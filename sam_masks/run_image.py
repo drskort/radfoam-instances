@@ -24,7 +24,7 @@ from sam_masks.paths import (
     resolve_output_root,
     scene_image_dir,
 )
-from sam_masks.store import FrameMasks, save_frame, write_meta
+from sam_masks.store import FrameMasks, read_meta, save_frame, write_meta
 
 
 def run(scene, model, output_root=None, config=None, limit=None, force=False):
@@ -79,6 +79,17 @@ def run(scene, model, output_root=None, config=None, limit=None, force=False):
         except Exception as exc:  # keep a multi-hour job alive
             failures.append({"frame_idx": frame_idx, "name": name, "error": repr(exc)})
 
+    # Carry forward the previous invocation's record. A resumed run recomputes
+    # nothing, so writing a fresh meta would erase the failure list from the pass
+    # that actually did the work -- and Task 14 reads `failures` to decide
+    # whether an arm is trustworthy.
+    previous = {}
+    if (out / "meta.json").exists():
+        try:
+            previous = read_meta(out)
+        except (OSError, ValueError):
+            previous = {}
+
     write_meta(
         out,
         {
@@ -90,8 +101,11 @@ def run(scene, model, output_root=None, config=None, limit=None, force=False):
             "n_computed": len(todo),
             "n_skipped": skipped,
             "config": vars(config),
-            "failures": failures,
-            "elapsed_s": round(time.time() - started, 1),
+            "failures": previous.get("failures", []) + failures,
+            "elapsed_s": round(
+                previous.get("elapsed_s", 0.0) + time.time() - started, 1
+            ),
+            "invocations": previous.get("invocations", 0) + 1,
         },
     )
     if failures:
