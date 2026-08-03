@@ -1,4 +1,8 @@
 .vscode
+/.venv/
+/.venv-sam*/
+/external/sam_backends/
+/radfoam-build-*.log
 /build*/
 /dist/
 /data
