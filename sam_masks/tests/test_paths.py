@@ -45,3 +45,19 @@ def test_scene_image_dir_uses_downsample_factor(tmp_path):
 def test_scene_image_dir_rejects_unknown_scene(tmp_path):
     with pytest.raises(KeyError, match="atlantis"):
         scene_image_dir("atlantis", root=tmp_path)
+
+
+def test_shared_nodes_path_wins_over_node_local_work(tmp_path):
+    # /work exists on every compute node as that node's own scratch. Preferring
+    # it would scatter a multi-job run across several machines' local disks, so
+    # the shared /nodes view must win whenever both are present.
+    from sam_masks.paths import OUTPUT_ROOT_CANDIDATES
+
+    assert "nodes" in str(OUTPUT_ROOT_CANDIDATES[0]).split("/")[1]
+
+    node_local = tmp_path / "work" / "user"
+    shared = tmp_path / "nodes" / "host" / "work" / "user"
+    node_local.mkdir(parents=True)
+    shared.mkdir(parents=True)
+
+    assert resolve_output_root(candidates=[shared, node_local]) == shared
