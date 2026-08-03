@@ -38,8 +38,16 @@ class Sam21Session(Session):
     def propagate(self):
         for frame_idx, obj_ids, logits in self.predictor.propagate_in_video(self.state):
             masks = (logits > 0.0).cpu().numpy()
+            # Empty masks are dropped to match SAM 3.1, which discards zero-area
+            # masks internally. SAM 2 instead returns a zero-filled row for every
+            # registered object on every frame, so without this filter its object
+            # count would be constant by construction -- making a model that had
+            # lost every track look like one with perfect retention, which is
+            # precisely the quantity this experiment compares.
             yield frame_idx, {
-                int(obj_id): masks[i, 0] for i, obj_id in enumerate(obj_ids)
+                int(obj_id): masks[i, 0]
+                for i, obj_id in enumerate(obj_ids)
+                if masks[i, 0].any()
             }
 
     def close(self):

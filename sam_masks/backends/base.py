@@ -21,7 +21,16 @@ class Session(ABC):
 
     @abstractmethod
     def propagate(self):
-        """Yield (frame_idx, {obj_id: (H, W) bool mask}) for every frame."""
+        """Yield (frame_idx, {obj_id: (H, W) bool mask}) for every frame.
+
+        Only LIVE objects appear: an object whose track was lost on a frame must
+        be absent from that frame's dict, never present with an empty mask. The
+        two backends disagree natively -- SAM 3.1 drops zero-area masks while
+        SAM 2 returns a zero-filled row for every registered object -- so an
+        adapter over a model that pads must filter. Without this, object counts
+        would not be commensurable across arms and a model that lost every track
+        would score as perfectly stable.
+        """
 
     @abstractmethod
     def close(self):

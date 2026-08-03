@@ -17,7 +17,7 @@ import numpy as np
 class AutomaskConfig:
     points_per_side: int = 32
     pred_iou_thresh: float = 0.8
-    stability_thresh: float = 0.9
+    stability_thresh: float = 0.95   # SAM2AutomaticMaskGenerator's own default
     nms_iou_thresh: float = 0.7
     top_k: int = 256
     min_mask_area: int = 1

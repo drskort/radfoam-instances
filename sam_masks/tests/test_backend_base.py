@@ -66,3 +66,43 @@ def test_propagate_yields_frame_index_and_id_to_mask_mapping():
 def test_base_backend_methods_are_abstract():
     with pytest.raises(TypeError):
         Backend()
+
+
+class StubSam2Predictor:
+    """Mimics SAM 2's padding behaviour: a row per registered object, always."""
+
+    def __init__(self, logits_per_frame):
+        self.logits_per_frame = logits_per_frame
+
+    def init_state(self, video_path):
+        return {"video_path": video_path}
+
+    def add_new_mask(self, inference_state, frame_idx, obj_id, mask):
+        return None
+
+    def propagate_in_video(self, state):
+        for frame_idx, logits in enumerate(self.logits_per_frame):
+            yield frame_idx, [1, 2], logits
+
+    def reset_state(self, state):
+        return None
+
+
+def test_sam21_session_drops_lost_tracks_instead_of_padding():
+    # SAM 2 returns a zero-filled row for a lost track rather than omitting it.
+    # Object 2 is alive on frame 0 and lost on frame 1.
+    import torch
+
+    from sam_masks.backends.sam21 import Sam21Session
+
+    alive = torch.full((2, 1, 4, 4), 1.0)
+    one_lost = torch.stack(
+        [torch.full((1, 4, 4), 1.0), torch.full((1, 4, 4), -1.0)]
+    )
+    session = Sam21Session(StubSam2Predictor([alive, one_lost]), "frames")
+
+    frames = dict(session.propagate())
+
+    assert sorted(frames[0]) == [1, 2], "both objects alive on frame 0"
+    assert sorted(frames[1]) == [1], "lost track must be absent, not empty"
+    assert all(m.any() for masks in frames.values() for m in masks.values())
