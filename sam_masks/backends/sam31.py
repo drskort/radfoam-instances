@@ -151,11 +151,11 @@ class Sam31Session(Session):
 class Sam31Backend(Backend):
     name = "sam31"
 
-    # 1024 so a full 32x32 grid fits; the builder's own default is 16. Raising
-    # it is safe: buckets are allocated dynamically and the row-padding path that
-    # would penalise large values is in the text-driven flow, which the
-    # point-grid path bypasses.
-    def __init__(self, config=None, device="cuda", max_objects=1024):
+    # 512: enough for a 16x16 seed grid (256) plus growth from the video arm's
+    # re-seeding, while staying under the memory cliff. Measured peak is 17.5 GiB
+    # at 256 tracked objects and 33.9 GiB at 576; 1024 OOMs a 48 GB A40. The
+    # builder's own default is 16, which silently drops most of the grid.
+    def __init__(self, config=None, device="cuda", max_objects=512):
         from sam3.model_builder import build_sam3_predictor
 
         self.config = config or AutomaskConfig()

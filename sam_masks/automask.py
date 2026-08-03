@@ -5,7 +5,9 @@ we build; SAM 2.1's generator does the same work internally. Keeping it here, an
 using it for both backends, means proposal behaviour is comparable across arms by
 construction rather than by coincidence.
 
-Defaults match SAM's published automatic mask generator settings.
+Threshold defaults match SAM's published automatic mask generator. The point
+grid does not -- see AutomaskConfig.points_per_side for the measurements that
+set it.
 """
 
 from dataclasses import dataclass
@@ -15,11 +17,18 @@ import numpy as np
 
 @dataclass
 class AutomaskConfig:
-    # 32x32, matching SAM's published automatic mask generator. Note SAM 3.1 has
-    # no batched prompting -- everything-mode costs one model call per grid point
-    # (~87 ms measured), so its per-image arm runs ~90 s per image. Backends must
-    # allow at least points_per_side ** 2 objects or part of the grid is dropped.
-    points_per_side: int = 32
+    # 16x16, set by measurement rather than by SAM's published 32x32. SAM 3.1
+    # tracks every grid point as a separate object with its own memory state, so
+    # cost grows superlinearly in points and 32x32 (1024 objects) OOMs a 48 GB
+    # A40. Measured on garden at 1297x840, one image:
+    #     16x16  256 pts   27 s  17.5 GiB  239 masks  95.2% coverage
+    #     20x20  400 pts   67 s  25.0 GiB  256 masks  96.5% coverage
+    #     24x24  576 pts  142 s  33.9 GiB  256 masks  97.7% coverage
+    #     32x32 1024 pts   OOM
+    # At 20x20 and above the kept-mask count is exactly top_k, i.e. the extra
+    # proposals are discarded by our own filtering -- 5.3x the compute for +2.5
+    # points of coverage. 16x16 lands just under the cap, so nothing is wasted.
+    points_per_side: int = 16
     pred_iou_thresh: float = 0.8
     stability_thresh: float = 0.95   # SAM2AutomaticMaskGenerator's own default
     nms_iou_thresh: float = 0.7
