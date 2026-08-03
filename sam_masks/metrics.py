@@ -137,13 +137,22 @@ def cosegmentation_agreement(
 
     same_rate = same_hits / same_total if same_total else float("nan")
     diff_rate = diff_hits / diff_total if diff_total else float("nan")
-    rates = [r for r in (same_rate, diff_rate) if not np.isnan(r)]
+
+    # A missing half makes the score undefined, not perfect. If a segmentation
+    # collapses to a single mask in every view there are no differing pairs
+    # anywhere, so diff_rate is nan; averaging only the same-rate would return
+    # 1.0 and tie the most degenerate possible output with a perfect one.
+    # np.mean propagates the nan, which is the honest answer.
+    balanced = float(np.mean([same_rate, diff_rate]))
 
     return {
+        # Raw agreement is NOT comparable between arms: it rises with mask
+        # count, reaching ~0.98 at pure chance for a segmentation with many
+        # small masks. Reported for diagnosis only; compare on `balanced`.
         "agreement": (same_hits + diff_hits) / total,
         "same_pair_agreement": same_rate,
         "diff_pair_agreement": diff_rate,
-        "balanced": float(np.mean(rates)),
+        "balanced": balanced,
         "n_pairs": total,
         "n_view_pairs": used_view_pairs,
     }

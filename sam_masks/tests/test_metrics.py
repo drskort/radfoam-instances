@@ -137,3 +137,19 @@ def test_stability_descriptors_report_counts_and_areas():
 def test_stability_handles_no_frames():
     result = stability_descriptors([], [])
     assert np.isnan(result["mean_masks_per_frame"])
+
+
+def test_total_degeneracy_is_undefined_not_perfect():
+    # Every point in one mask in EVERY view: no differing pairs exist anywhere,
+    # so there is no evidence the segmentation separates anything. Scoring this
+    # 1.0 would tie the worst possible output with a perfect one.
+    per_frame = {
+        0: {1: 99, 2: 99, 3: 99, 4: 99},
+        1: {1: 99, 2: 99, 3: 99, 4: 99},
+    }
+
+    result = cosegmentation_agreement(per_frame, rng=np.random.default_rng(0))
+
+    assert result["same_pair_agreement"] == pytest.approx(1.0)
+    assert np.isnan(result["diff_pair_agreement"])
+    assert np.isnan(result["balanced"])
