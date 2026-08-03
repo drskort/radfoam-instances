@@ -43,8 +43,10 @@ def run(scene, model, output_root=None, config=None, limit=None, force=False):
     out.mkdir(parents=True, exist_ok=True)
 
     source = scene_image_dir(scene)
-    sequence = build_sequence(source, out / "frames")
-    names = sequence.names[:limit] if limit else sequence.names
+    # limit is applied when building the farm, not after: the video predictors
+    # propagate over every frame present in that directory.
+    sequence = build_sequence(source, out / "frames", limit=limit)
+    names = sequence.names
 
     todo = [
         (i, name)

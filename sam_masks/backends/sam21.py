@@ -16,9 +16,20 @@ DEFAULT_CHECKPOINT = "facebook/sam2.1-hiera-large"
 
 
 class Sam21Session(Session):
-    def __init__(self, predictor, frames_dir):
+    def __init__(self, predictor, frames_dir, device="cuda"):
         self.predictor = predictor
-        self.state = predictor.init_state(video_path=str(frames_dir))
+        # SAM 2 caches memory features in bfloat16 when prompts are added, then
+        # reads them back in memory attention during propagation. Without a
+        # consistent autocast across the session's whole life those two halves
+        # disagree and propagate_in_video dies with "mat1 and mat2 must have the
+        # same dtype". Upstream's own notebooks wrap all predictor use this way.
+        self._autocast = torch.autocast(device, dtype=torch.bfloat16)
+        self._autocast.__enter__()
+        try:
+            self.state = predictor.init_state(video_path=str(frames_dir))
+        except Exception:
+            self._autocast.__exit__(None, None, None)
+            raise
         self._next_id = 1
 
     def add_masks(self, frame_idx, masks):
@@ -35,8 +46,12 @@ class Sam21Session(Session):
             obj_ids.append(obj_id)
         return obj_ids
 
-    def propagate(self):
-        for frame_idx, obj_ids, logits in self.predictor.propagate_in_video(self.state):
+    def propagate(self, start_frame=None, max_frames=None):
+        for frame_idx, obj_ids, logits in self.predictor.propagate_in_video(
+            self.state,
+            start_frame_idx=start_frame,
+            max_frame_num_to_track=max_frames,
+        ):
             masks = (logits > 0.0).cpu().numpy()
             # Empty masks are dropped to match SAM 3.1, which discards zero-area
             # masks internally. SAM 2 instead returns a zero-filled row for every
@@ -51,8 +66,11 @@ class Sam21Session(Session):
             }
 
     def close(self):
-        self.predictor.reset_state(self.state)
-        del self.state
+        try:
+            self.predictor.reset_state(self.state)
+            del self.state
+        finally:
+            self._autocast.__exit__(None, None, None)
         torch.cuda.empty_cache()
 
 
@@ -91,4 +109,4 @@ class Sam21Backend(Backend):
         return filter_and_dedupe(masks, scores, self.config)
 
     def start_session(self, frames_dir):
-        return Sam21Session(self._video_predictor, frames_dir)
+        return Sam21Session(self._video_predictor, frames_dir, device=self.device)

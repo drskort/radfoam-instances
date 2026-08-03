@@ -15,7 +15,7 @@ class FakeSession(Session):
         self.registered[frame_idx] = obj_ids
         return obj_ids
 
-    def propagate(self):
+    def propagate(self, start_frame=None, max_frames=None):
         yield 0, {1: np.ones((4, 4), dtype=bool)}
 
     def close(self):
@@ -80,8 +80,13 @@ class StubSam2Predictor:
     def add_new_mask(self, inference_state, frame_idx, obj_id, mask):
         return None
 
-    def propagate_in_video(self, state):
+    def propagate_in_video(self, state, start_frame_idx=None, max_frame_num_to_track=None):
+        start = start_frame_idx or 0
         for frame_idx, logits in enumerate(self.logits_per_frame):
+            if frame_idx < start:
+                continue
+            if max_frame_num_to_track is not None and frame_idx - start >= max_frame_num_to_track:
+                return
             yield frame_idx, [1, 2], logits
 
     def reset_state(self, state):
@@ -106,3 +111,18 @@ def test_sam21_session_drops_lost_tracks_instead_of_padding():
     assert sorted(frames[0]) == [1, 2], "both objects alive on frame 0"
     assert sorted(frames[1]) == [1], "lost track must be absent, not empty"
     assert all(m.any() for masks in frames.values() for m in masks.values())
+
+
+def test_sam21_session_propagate_honours_frame_range():
+    # The video runner propagates in segments so it can compare new proposals
+    # against live masks at the seed viewpoint; the range must be respected.
+    import torch
+
+    from sam_masks.backends.sam21 import Sam21Session
+
+    frames = [torch.full((2, 1, 4, 4), 1.0) for _ in range(5)]
+    session = Sam21Session(StubSam2Predictor(frames), "frames")
+
+    got = [f for f, _ in session.propagate(start_frame=1, max_frames=2)]
+
+    assert got == [1, 2]

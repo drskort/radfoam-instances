@@ -99,3 +99,30 @@ def test_pose_order_follows_nearest_neighbour_chain():
 def test_pose_order_rejects_length_mismatch():
     with pytest.raises(ValueError, match="same length"):
         pose_order(["a", "b"], np.zeros((3, 3)))
+
+
+def test_limit_truncates_the_symlink_farm(tmp_path):
+    # The video predictors propagate over every frame in the farm, so a farm
+    # larger than the requested run keeps tracking past the last wanted frame.
+    src = make_images(tmp_path, ["a.JPG", "b.JPG", "c.JPG", "d.JPG"])
+    out = tmp_path / "frames"
+
+    seq = build_sequence(src, out, limit=2)
+
+    assert seq.names == ["a.JPG", "b.JPG"]
+    assert [p.name for p in sorted(out.iterdir())] == ["000000.jpg", "000001.jpg"]
+
+
+def test_limit_is_reflected_in_frame_index(tmp_path):
+    src = make_images(tmp_path, ["a.JPG", "b.JPG", "c.JPG"])
+    out = tmp_path / "frames"
+
+    build_sequence(src, out, limit=1)
+
+    assert load_frame_index(out.parent).names == ["a.JPG"]
+
+
+def test_limit_of_none_keeps_everything(tmp_path):
+    src = make_images(tmp_path, ["a.JPG", "b.JPG"])
+    seq = build_sequence(src, tmp_path / "frames", limit=None)
+    assert len(seq.names) == 2

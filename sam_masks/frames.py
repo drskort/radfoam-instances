@@ -69,11 +69,16 @@ def pose_order(names, centres):
     return [names[i] for i in path]
 
 
-def build_sequence(source_dir, frames_dir, order="filename", centres=None):
+def build_sequence(source_dir, frames_dir, order="filename", centres=None, limit=None):
     """Create the numbered symlink farm and write frame_index.json beside it.
 
     frame_index.json is written to frames_dir.parent so it sits next to, rather
     than inside, the directory handed to the model.
+
+    limit truncates the sequence. It must be honoured here rather than by the
+    caller: the video predictors propagate over every frame in this directory, so
+    a farm built larger than the requested run keeps tracking long past the last
+    frame anyone asked for -- which on a full scene exhausts GPU memory.
     """
     source_dir = Path(source_dir)
     frames_dir = Path(frames_dir)
@@ -86,6 +91,9 @@ def build_sequence(source_dir, frames_dir, order="filename", centres=None):
         names = pose_order(names, centres)
     elif order != "filename":
         raise ValueError(f"Unknown order {order!r}; expected 'filename' or 'pose'")
+
+    if limit is not None:
+        names = names[:limit]
 
     frames_dir.mkdir(parents=True, exist_ok=True)
     # Clear first: a shrunk source would otherwise leave stale symlinks behind,

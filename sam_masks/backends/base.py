@@ -20,8 +20,14 @@ class Session(ABC):
         """
 
     @abstractmethod
-    def propagate(self):
-        """Yield (frame_idx, {obj_id: (H, W) bool mask}) for every frame.
+    def propagate(self, start_frame=None, max_frames=None):
+        """Yield (frame_idx, {obj_id: (H, W) bool mask}) over a frame range.
+
+        start_frame and max_frames let the caller propagate in segments, which
+        the video runner needs: to decide whether a new proposal is already
+        being tracked it must compare against the tracker's LIVE masks at that
+        viewpoint, and those only exist once propagation has reached it.
+
 
         Only LIVE objects appear: an object whose track was lost on a frame must
         be absent from that frame's dict, never present with an empty mask. The

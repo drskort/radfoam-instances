@@ -109,15 +109,16 @@ class Sam31Session(Session):
             obj_ids.append(obj_id)
         return obj_ids
 
-    def propagate(self):
-        stream = self.predictor.handle_stream_request(
-            {
-                "type": "propagate_in_video",
-                "session_id": self.session_id,
-                "propagation_direction": "forward",
-                "start_frame_index": 0,
-            }
-        )
+    def propagate(self, start_frame=None, max_frames=None):
+        request = {
+            "type": "propagate_in_video",
+            "session_id": self.session_id,
+            "propagation_direction": "forward",
+            "start_frame_index": 0 if start_frame is None else int(start_frame),
+        }
+        if max_frames is not None:
+            request["max_frame_num_to_track"] = int(max_frames)
+        stream = self.predictor.handle_stream_request(request)
         for item in stream:
             outputs = item["outputs"]
             if not outputs:
