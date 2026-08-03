@@ -24,6 +24,7 @@ from PIL import Image
 from sam_masks.colmap_tracks import load_observations
 from sam_masks.frames import load_frame_index
 from sam_masks.metrics import (
+    agreement_by_separation,
     cosegmentation_agreement,
     label_purity,
     sample_point_labels,
@@ -74,6 +75,9 @@ def evaluate_arm(arm_path, observations, n_frames, mode="video", seed=0):
     rng = np.random.default_rng(seed)
     result = {
         "cosegmentation": cosegmentation_agreement(per_frame_labels, rng=rng),
+        "by_separation": agreement_by_separation(
+            per_frame_labels, rng=np.random.default_rng(seed)
+        ),
         "stability": stability_descriptors(counts, areas),
         "frames_evaluated": len(counts),
     }
@@ -137,6 +141,27 @@ def render_summary(scene, reports, provenance=None):
                 _fmt(report.get("frames_evaluated")),
             )
         )
+
+    # The separation curve, which is the informative view: a method carrying real
+    # cross-view identity holds up as views get further apart.
+    curves = {a: r.get("by_separation") for a, r in reports.items() if r.get("by_separation")}
+    if curves:
+        buckets = list(next(iter(curves.values())).keys())
+        lines += [
+            "",
+            "## Agreement by viewpoint separation",
+            "",
+            "`balanced` restricted to view pairs that many frames apart. Adjacent",
+            "views are easy for any method; the question is how far identity",
+            "survives. A flat row carries identity across the orbit, a row that",
+            "decays towards 0.5 is mostly reporting that nearby frames look alike.",
+            "",
+            "| arm | " + " | ".join(f"{b} apart" for b in buckets) + " |",
+            "| --- | " + " | ".join("---" for _ in buckets) + " |",
+        ]
+        for arm, curve in curves.items():
+            cells = [_fmt(curve[b].get("balanced")) for b in buckets]
+            lines.append(f"| {arm} | " + " | ".join(cells) + " |")
 
     if provenance:
         lines += ["", "## Run provenance", ""]

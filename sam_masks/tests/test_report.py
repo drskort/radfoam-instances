@@ -151,3 +151,28 @@ def test_render_summary_reports_provenance_and_confound():
 
     assert "669" in text and "170" in text
     assert "non-overlapping" in text, "the SAM3.1-vs-SAM2.1 confound must be stated"
+
+
+def test_summary_renders_the_separation_curve():
+    reports = {
+        "sam21_video": {
+            "cosegmentation": {"balanced": 0.9},
+            "by_separation": {
+                "1-2": {"balanced": 0.99},
+                "3-5": {"balanced": 0.93},
+                "6-10": {"balanced": 0.71},
+                "11-20": {"balanced": float("nan")},
+            },
+            "purity": None,
+            "stability": {},
+            "tracks": None,
+            "frames_evaluated": 10,
+        }
+    }
+
+    text = render_summary("garden", reports)
+
+    assert "Agreement by viewpoint separation" in text
+    assert "1-2 apart" in text and "6-10 apart" in text
+    assert "0.990" in text and "0.710" in text
+    assert "undef" in text

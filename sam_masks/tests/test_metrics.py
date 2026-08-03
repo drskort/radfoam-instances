@@ -153,3 +153,43 @@ def test_total_degeneracy_is_undefined_not_perfect():
     assert result["same_pair_agreement"] == pytest.approx(1.0)
     assert np.isnan(result["diff_pair_agreement"])
     assert np.isnan(result["balanced"])
+
+
+def test_agreement_restricted_to_a_separation_range():
+    # Frames 0 and 1 agree; frame 9 disagrees. Restricting to adjacent views
+    # must see only the agreement, and to distant views only the disagreement.
+    per_frame = {
+        0: {1: 10, 2: 10, 3: 20, 4: 20},
+        1: {1: 10, 2: 10, 3: 20, 4: 20},
+        9: {1: 10, 2: 20, 3: 10, 4: 20},
+    }
+    rng = np.random.default_rng(0)
+
+    near = cosegmentation_agreement(per_frame, rng=rng, min_separation=1, max_separation=2)
+    far = cosegmentation_agreement(per_frame, rng=rng, min_separation=8)
+
+    assert near["balanced"] == pytest.approx(1.0)
+    assert far["balanced"] < 1.0
+
+
+def test_agreement_with_no_pairs_in_range_is_undefined():
+    per_frame = {0: {1: 10, 2: 20}, 1: {1: 10, 2: 20}}
+
+    result = cosegmentation_agreement(per_frame, rng=np.random.default_rng(0),
+                                      min_separation=50)
+
+    assert result["n_view_pairs"] == 0
+    assert np.isnan(result["balanced"])
+
+
+def test_agreement_by_separation_returns_a_bucket_per_range():
+    from sam_masks.metrics import agreement_by_separation
+
+    per_frame = {i: {1: 10, 2: 10, 3: 20, 4: 20} for i in range(12)}
+
+    curve = agreement_by_separation(per_frame, rng=np.random.default_rng(0))
+
+    assert "1-2" in curve and "6-10" in curve and "51+" in curve
+    assert curve["1-2"]["balanced"] == pytest.approx(1.0)
+    # No frames are 51 apart in a 12-frame sequence.
+    assert np.isnan(curve["51+"]["balanced"])

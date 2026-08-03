@@ -82,8 +82,45 @@ def _sample_pairs(items, rng, max_pairs):
     return list(pairs)[:max_pairs]
 
 
+# Frame-index separations to report the agreement curve over. A single number
+# averaged across all view pairs hides the shape of the answer: adjacent views
+# are easy for any method, and what distinguishes real cross-view identity from
+# luck is how far it survives.
+SEPARATION_BUCKETS = [(1, 2), (3, 5), (6, 10), (11, 20), (21, 50), (51, None)]
+
+
+def agreement_by_separation(
+    per_frame_labels, rng, buckets=None, max_pairs=200_000, max_view_pairs=500
+):
+    """Co-segmentation agreement bucketed by how far apart the two views are.
+
+    Returns {"1-2": {...}, "3-5": {...}, ...}. A method whose agreement holds up
+    at large separation is carrying genuine object identity across the orbit; one
+    that only scores well on adjacent frames is mostly reporting that adjacent
+    frames look alike.
+    """
+    buckets = buckets if buckets is not None else SEPARATION_BUCKETS
+    out = {}
+    for low, high in buckets:
+        label = f"{low}-{high}" if high is not None else f"{low}+"
+        out[label] = cosegmentation_agreement(
+            per_frame_labels,
+            rng=rng,
+            max_pairs=max_pairs,
+            max_view_pairs=max_view_pairs,
+            min_separation=low,
+            max_separation=high,
+        )
+    return out
+
+
 def cosegmentation_agreement(
-    per_frame_labels, rng, max_pairs=200_000, max_view_pairs=500
+    per_frame_labels,
+    rng,
+    max_pairs=200_000,
+    max_view_pairs=500,
+    min_separation=None,
+    max_separation=None,
 ):
     """Rand-index-style agreement of point grouping between pairs of views.
 
@@ -93,6 +130,19 @@ def cosegmentation_agreement(
     """
     frames = sorted(per_frame_labels)
     view_pairs = list(itertools.combinations(frames, 2))
+    if min_separation is not None:
+        view_pairs = [p for p in view_pairs if abs(p[1] - p[0]) >= min_separation]
+    if max_separation is not None:
+        view_pairs = [p for p in view_pairs if abs(p[1] - p[0]) <= max_separation]
+    if not view_pairs:
+        return {
+            "agreement": float("nan"),
+            "same_pair_agreement": float("nan"),
+            "diff_pair_agreement": float("nan"),
+            "balanced": float("nan"),
+            "n_pairs": 0,
+            "n_view_pairs": 0,
+        }
     if len(view_pairs) > max_view_pairs:
         chosen = rng.choice(len(view_pairs), size=max_view_pairs, replace=False)
         view_pairs = [view_pairs[i] for i in sorted(chosen)]
