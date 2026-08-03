@@ -18,6 +18,9 @@ class FakeSession(Session):
     def propagate(self, start_frame=None, max_frames=None):
         yield 0, {1: np.ones((4, 4), dtype=bool)}
 
+    def remove_objects(self, obj_ids, frame_idx=0):
+        self.removed = list(obj_ids)
+
     def close(self):
         pass
 

@@ -65,6 +65,13 @@ class Sam21Session(Session):
                 if masks[i, 0].any()
             }
 
+    def remove_objects(self, obj_ids, frame_idx=0):
+        for obj_id in obj_ids:
+            # strict=False: an id the tracker has already dropped is not an error.
+            self.predictor.remove_object(
+                self.state, int(obj_id), strict=False, need_output=False
+            )
+
     def close(self):
         try:
             self.predictor.reset_state(self.state)

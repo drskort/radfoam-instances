@@ -39,6 +39,18 @@ class Session(ABC):
         """
 
     @abstractmethod
+    def remove_objects(self, obj_ids, frame_idx=0):
+        """Stop tracking these objects and release their slots.
+
+        The models cap how many objects a session may hold, and that cap counts
+        every object ever registered -- dead tracks included. On a long orbit
+        with periodic re-seeding the budget is therefore exhausted by objects
+        that stopped existing long ago, and seeding silently stops. Pruning is
+        what makes the cap mean "live objects", which is the only version of it
+        that reflects a real memory constraint.
+        """
+
+    @abstractmethod
     def close(self):
         """Release model state and GPU memory."""
 

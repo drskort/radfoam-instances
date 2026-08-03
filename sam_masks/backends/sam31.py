@@ -142,6 +142,17 @@ class Sam31Session(Session):
                 if masks[i].any()
             }
 
+    def remove_objects(self, obj_ids, frame_idx=0):
+        for obj_id in obj_ids:
+            self.predictor.handle_request(
+                {
+                    "type": "remove_object",
+                    "session_id": self.session_id,
+                    "frame_index": int(frame_idx),
+                    "obj_id": int(obj_id),
+                }
+            )
+
     def close(self):
         self.predictor.handle_request(
             {"type": "close_session", "session_id": self.session_id}

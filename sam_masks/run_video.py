@@ -40,6 +40,11 @@ DEFAULT_RESEED_IOU = 0.5
 # 48 GB A40. Re-seeding accumulates, so on a long scene this cap will bind --
 # that is expected, and it is logged rather than applied silently.
 DEFAULT_MAX_OBJECTS = 512
+# Objects unseen for this many frames are released before the next re-seed. The
+# model's cap counts every object ever registered, so without pruning a long
+# orbit fills its budget with dead tracks and stops seeding entirely -- measured
+# on garden, SAM 3.1 would saturate around frame 20 of 185.
+DEFAULT_STALE_AFTER = 10
 
 
 def reseed_frames(n_frames, every):
@@ -88,6 +93,7 @@ def run(
     reseed_every=DEFAULT_RESEED_EVERY,
     reseed_iou=DEFAULT_RESEED_IOU,
     max_objects=DEFAULT_MAX_OBJECTS,
+    stale_after=DEFAULT_STALE_AFTER,
     limit=None,
     force=False,
 ):
@@ -130,7 +136,19 @@ def run(
         # against.
         live = {}
         written = {}
+        last_seen = {}
+        prunings = []
         for i, seed in enumerate(seed_points):
+            # Release tracks that have been gone long enough to call dead. This
+            # is what keeps the object budget spent on things that still exist.
+            stale = [o for o, f in last_seen.items() if seed - f > stale_after]
+            if stale:
+                session.remove_objects(stale, frame_idx=seed)
+                for o in stale:
+                    last_seen.pop(o, None)
+                    live.pop(o, None)
+                prunings.append({"frame_idx": seed, "n_pruned": len(stale)})
+
             try:
                 image = np.array(Image.open(source / names[seed]).convert("RGB"))
                 proposals, _ = backend.propose_masks(
@@ -200,6 +218,8 @@ def run(
                     ),
                 )
                 written[frame_idx] = len(obj_ids)
+                for o in obj_ids:
+                    last_seen[o] = frame_idx
                 if frame_idx == last:
                     live = masks_by_id
 
@@ -226,6 +246,9 @@ def run(
             "reseed_every": reseed_every,
             "reseed_iou": reseed_iou,
             "max_objects": max_objects,
+            "stale_after": stale_after,
+            "prunings": prunings,
+            "n_pruned_total": sum(p["n_pruned"] for p in prunings),
             "cap_hits": cap_hits,
             "promotions": promotions,
             "failures": failures,
@@ -248,6 +271,8 @@ def main():
     parser.add_argument("--reseed-every", type=int, default=DEFAULT_RESEED_EVERY)
     parser.add_argument("--reseed-iou", type=float, default=DEFAULT_RESEED_IOU)
     parser.add_argument("--max-objects", type=int, default=DEFAULT_MAX_OBJECTS)
+    parser.add_argument("--stale-after", type=int, default=DEFAULT_STALE_AFTER,
+                        help="Release objects unseen for this many frames.")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--force", action="store_true",
                         help="Recompute even if the arm is already complete.")
@@ -260,6 +285,7 @@ def main():
         reseed_every=args.reseed_every,
         reseed_iou=args.reseed_iou,
         max_objects=args.max_objects,
+        stale_after=args.stale_after,
         limit=args.limit,
         force=args.force,
     )

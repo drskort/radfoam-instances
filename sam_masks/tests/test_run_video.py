@@ -94,3 +94,136 @@ def test_promote_unmatched_preserves_mask_shape():
     )
 
     assert new.shape == (1, 7, 9)
+
+
+class _FakeSession:
+    """Records what the runner asks of a session, and forgets tracks over time."""
+
+    def __init__(self, n_frames, lifetime):
+        self.n_frames = n_frames
+        self.lifetime = lifetime          # frames an object survives after seeding
+        self.added, self.removed = [], []
+        self._next_id = 1
+        self._born = {}
+
+    def add_masks(self, frame_idx, masks):
+        ids = list(range(self._next_id, self._next_id + masks.shape[0]))
+        self._next_id += masks.shape[0]
+        for i in ids:
+            self._born[i] = frame_idx
+        self.added.append((frame_idx, len(ids)))
+        return ids
+
+    def remove_objects(self, obj_ids, frame_idx=0):
+        self.removed.append((frame_idx, sorted(obj_ids)))
+        for o in obj_ids:
+            self._born.pop(o, None)
+
+    def propagate(self, start_frame=None, max_frames=None):
+        start = start_frame or 0
+        stop = min(self.n_frames, start + (max_frames or self.n_frames))
+        for f in range(start, stop):
+            alive = {
+                o: np.ones((4, 4), dtype=bool)
+                for o, born in self._born.items()
+                if f - born < self.lifetime
+            }
+            yield f, alive
+
+    def remove_stale(self):
+        pass
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
+
+
+class _FakeBackend:
+    name = "fake"
+
+    def __init__(self, n_frames, lifetime, n_proposals):
+        self.session = _FakeSession(n_frames, lifetime)
+        self.n_proposals = n_proposals
+
+    def propose_masks(self, image, image_path=None):
+        masks = np.zeros((self.n_proposals, 4, 4), dtype=bool)
+        for i in range(self.n_proposals):
+            masks[i, i % 4, i % 4] = True
+        return masks, [0.9] * self.n_proposals
+
+    def start_session(self, frames_dir):
+        return self.session
+
+
+def _fake_scene(tmp_path, n_frames):
+    from PIL import Image
+
+    src = tmp_path / "images_4"
+    src.mkdir(parents=True)
+    for i in range(n_frames):
+        Image.new("RGB", (4, 4)).save(src / f"img{i:03d}.jpg")
+    return src
+
+
+def test_runner_prunes_dead_tracks_before_reseeding(tmp_path, monkeypatch):
+    """The runner must release tracks that died, not just stop seeding.
+
+    Objects here survive 3 frames after being seeded, so by the next re-seed
+    they are long gone. If the runner does not prune, the model's object budget
+    fills with dead tracks and seeding stops -- which is exactly what saturated
+    SAM 3.1 around frame 20 of 185 before this was added.
+    """
+    from sam_masks import run_video
+
+    n_frames = 24
+    src = _fake_scene(tmp_path, n_frames)
+    backend = _FakeBackend(n_frames=n_frames, lifetime=3, n_proposals=5)
+
+    monkeypatch.setattr(run_video, "scene_image_dir", lambda scene: src)
+    monkeypatch.setattr(run_video, "get_backend", lambda *a, **k: backend)
+    monkeypatch.setitem(run_video.DOWNSAMPLE, "garden", 4)
+
+    out = run_video.run(
+        "garden", "fake", output_root=tmp_path / "out",
+        reseed_every=6, stale_after=3, max_objects=12, limit=n_frames,
+    )
+
+    from sam_masks.store import read_meta
+
+    meta = read_meta(out)
+    assert meta["complete"], "run did not finish"
+    assert meta["n_pruned_total"] > 0, "no tracks were ever pruned"
+    assert backend.session.removed, "session.remove_objects was never called"
+    # Seeding must keep happening after the cap would otherwise have filled:
+    # 4 seeds x 5 proposals = 20 objects against a cap of 12.
+    assert len(backend.session.added) == 4, "seeding stopped early"
+
+
+def test_runner_does_not_prune_live_tracks(tmp_path, monkeypatch):
+    """Objects still being tracked must survive re-seeding untouched."""
+    from sam_masks import run_video
+
+    n_frames = 18
+    src = _fake_scene(tmp_path, n_frames)
+    # lifetime longer than the whole run: nothing ever goes stale.
+    backend = _FakeBackend(n_frames=n_frames, lifetime=999, n_proposals=3)
+
+    monkeypatch.setattr(run_video, "scene_image_dir", lambda scene: src)
+    monkeypatch.setattr(run_video, "get_backend", lambda *a, **k: backend)
+    monkeypatch.setitem(run_video.DOWNSAMPLE, "garden", 4)
+
+    out = run_video.run(
+        "garden", "fake", output_root=tmp_path / "out",
+        reseed_every=6, stale_after=3, max_objects=100, limit=n_frames,
+    )
+
+    from sam_masks.store import read_meta
+
+    assert read_meta(out)["n_pruned_total"] == 0
+    assert backend.session.removed == []
