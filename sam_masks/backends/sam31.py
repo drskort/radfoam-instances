@@ -151,7 +151,11 @@ class Sam31Session(Session):
 class Sam31Backend(Backend):
     name = "sam31"
 
-    def __init__(self, config=None, device="cuda", max_objects=512):
+    # 1024 so a full 32x32 grid fits; the builder's own default is 16. Raising
+    # it is safe: buckets are allocated dynamically and the row-padding path that
+    # would penalise large values is in the text-driven flow, which the
+    # point-grid path bypasses.
+    def __init__(self, config=None, device="cuda", max_objects=1024):
         from sam3.model_builder import build_sam3_predictor
 
         self.config = config or AutomaskConfig()
