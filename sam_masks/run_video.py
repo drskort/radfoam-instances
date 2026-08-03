@@ -75,14 +75,20 @@ def promote_unmatched(add_masks, frame_idx, proposals, tracked, iou_thresh):
     return new
 
 
-def _is_complete(out):
-    """True if a previous invocation finished this arm."""
+def _is_complete(out, n_frames):
+    """True if a previous invocation finished this arm over the same frame count.
+
+    The frame count has to match. A completed 24-frame smoke run also carries
+    complete=True, and skipping a 185-frame request on the strength of it would
+    silently leave the arm eight times shorter than asked for.
+    """
     if not (Path(out) / "meta.json").exists():
         return False
     try:
-        return bool(read_meta(out).get("complete"))
+        meta = read_meta(out)
     except (OSError, ValueError):
         return False
+    return bool(meta.get("complete")) and meta.get("n_frames") == n_frames
 
 
 def run(
@@ -102,15 +108,15 @@ def run(
     out = arm_dir(output_root, scene, model, "video")
     out.mkdir(parents=True, exist_ok=True)
 
-    if not force and _is_complete(out):
-        print("arm already complete; pass --force to recompute")
-        return out
-
     source = scene_image_dir(scene)
     # limit is applied when building the farm, not after: the video predictors
     # propagate over every frame present in that directory.
     sequence = build_sequence(source, out / "frames", limit=limit)
     names = sequence.names
+
+    if not force and _is_complete(out, len(names)):
+        print(f"arm already complete over {len(names)} frames; pass --force to redo")
+        return out
 
     height, width = np.array(Image.open(source / names[0]).convert("RGB")).shape[:2]
     backend = get_backend(model, config=config, max_objects=max_objects)

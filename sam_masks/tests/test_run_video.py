@@ -227,3 +227,31 @@ def test_runner_does_not_prune_live_tracks(tmp_path, monkeypatch):
 
     assert read_meta(out)["n_pruned_total"] == 0
     assert backend.session.removed == []
+
+
+def test_completed_short_run_does_not_satisfy_a_longer_request(tmp_path, monkeypatch):
+    """A finished 12-frame arm must not let a 24-frame request skip.
+
+    Both carry complete=True; only the frame count distinguishes them, and
+    without that check the longer run silently returns a truncated arm.
+    """
+    from sam_masks import run_video
+    from sam_masks.store import read_meta
+
+    src = _fake_scene(tmp_path, 24)
+    monkeypatch.setattr(run_video, "scene_image_dir", lambda scene: src)
+    monkeypatch.setitem(run_video.DOWNSAMPLE, "garden", 4)
+
+    short = _FakeBackend(n_frames=24, lifetime=999, n_proposals=2)
+    monkeypatch.setattr(run_video, "get_backend", lambda *a, **k: short)
+    out = run_video.run("garden", "fake", output_root=tmp_path / "out",
+                        reseed_every=6, limit=12)
+    assert read_meta(out)["n_frames"] == 12
+
+    long = _FakeBackend(n_frames=24, lifetime=999, n_proposals=2)
+    monkeypatch.setattr(run_video, "get_backend", lambda *a, **k: long)
+    out = run_video.run("garden", "fake", output_root=tmp_path / "out",
+                        reseed_every=6, limit=24)
+
+    assert read_meta(out)["n_frames"] == 24, "short run wrongly satisfied a longer request"
+    assert long.session.added, "backend was never invoked for the longer run"
