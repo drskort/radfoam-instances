@@ -15,7 +15,12 @@ import numpy as np
 
 @dataclass
 class AutomaskConfig:
-    points_per_side: int = 32
+    # 16 rather than SAM's published 32: SAM 3.1 has no batched prompting, so
+    # everything-mode costs one model call per grid point (~87 ms measured).
+    # 32x32 would put the per-image arms at ~12 h for the two pilot scenes
+    # against ~3 h here. Applied identically to both backends, since an equal
+    # grid is what the model-vs-model comparison depends on.
+    points_per_side: int = 16
     pred_iou_thresh: float = 0.8
     stability_thresh: float = 0.95   # SAM2AutomaticMaskGenerator's own default
     nms_iou_thresh: float = 0.7

@@ -156,6 +156,18 @@ class Sam31Backend(Backend):
 
         self.config = config or AutomaskConfig()
         self.device = device
+
+        # Over the cap, add_prompt returns outputs=None with only a log warning,
+        # so an undersized max_objects silently discards part of the grid rather
+        # than failing. Refuse that configuration outright.
+        grid_points = self.config.points_per_side ** 2
+        if grid_points > max_objects:
+            raise ValueError(
+                f"points_per_side={self.config.points_per_side} needs "
+                f"{grid_points} objects but max_objects={max_objects}; "
+                "raise max_objects or lower points_per_side"
+            )
+
         self._predictor = build_sam3_predictor(
             version=VERSION,
             max_num_objects=max_objects,   # builder default is 16
