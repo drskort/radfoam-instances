@@ -272,7 +272,7 @@ def run(
 def main():
     parser = argparse.ArgumentParser(description="Run the video-propagated arm.")
     parser.add_argument("--scene", required=True)
-    parser.add_argument("--model", required=True, choices=["sam21", "sam21_levels", "sam31"])
+    parser.add_argument("--model", required=True, choices=["sam1", "sam21", "sam21_levels", "sam31"])
     parser.add_argument("--output-root", default=None)
     parser.add_argument("--reseed-every", type=int, default=DEFAULT_RESEED_EVERY)
     parser.add_argument("--reseed-iou", type=float, default=DEFAULT_RESEED_IOU)

@@ -121,7 +121,7 @@ def run(scene, model, output_root=None, config=None, limit=None, force=False):
 def main():
     parser = argparse.ArgumentParser(description="Run the per-image segmentation arm.")
     parser.add_argument("--scene", required=True)
-    parser.add_argument("--model", required=True, choices=["sam21", "sam21_levels", "sam31"])
+    parser.add_argument("--model", required=True, choices=["sam1", "sam21", "sam21_levels", "sam31"])
     parser.add_argument("--output-root", default=None)
     parser.add_argument("--limit", type=int, default=None,
                         help="Process only the first N frames (for smoke tests).")

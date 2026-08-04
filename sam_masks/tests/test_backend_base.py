@@ -132,3 +132,24 @@ def test_sam21_session_propagate_honours_frame_range():
     got = [f for f, _ in session.propagate(start_frame=1, max_frames=2)]
 
     assert got == [1, 2]
+
+
+def test_sam1_rejects_video_sessions():
+    # SAM 1 has no tracker. Failing loudly beats silently producing an arm that
+    # looks like a video arm but carries no cross-frame information.
+    import pytest
+
+    from sam_masks.backends.sam1 import Sam1Backend
+
+    backend = Sam1Backend.__new__(Sam1Backend)   # no checkpoint needed
+    with pytest.raises(NotImplementedError, match="no video predictor"):
+        backend.start_session("frames")
+
+
+def test_sam1_reports_a_missing_checkpoint_clearly():
+    import pytest
+
+    from sam_masks.backends.sam1 import Sam1Backend
+
+    with pytest.raises(FileNotFoundError, match="SAM 1 checkpoint not found"):
+        Sam1Backend(checkpoint="/nonexistent/sam.pth")

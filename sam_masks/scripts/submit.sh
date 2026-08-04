@@ -32,13 +32,13 @@
 set -euo pipefail
 
 usage() {
-    echo "usage: submit.sh <scene> <sam31|sam21|sam21_levels> <video|image>" >&2
+    echo "usage: submit.sh <scene> <sam1|sam21|sam21_levels|sam31> <video|image>" >&2
     exit 2
 }
 
 SCENE="${1:-}"; MODEL="${2:-}"; MODE="${3:-}"
 [ -n "$SCENE" ] && [ -n "$MODEL" ] && [ -n "$MODE" ] || usage
-case "$MODEL" in sam31|sam21|sam21_levels) ;; *) echo "bad model: $MODEL" >&2; usage ;; esac
+case "$MODEL" in sam31|sam21|sam21_levels|sam1) ;; *) echo "bad model: $MODEL" >&2; usage ;; esac
 case "$MODE"  in video|image) ;; *) echo "bad mode: $MODE"  >&2; usage ;; esac
 
 REPO="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
