@@ -71,8 +71,11 @@ class Backend(ABC):
     def propose_masks(self, image, image_path=None):
         """Everything-mode proposals for one image.
 
-        image is (H, W, 3) uint8 RGB. Returns (masks, scores) where masks is
-        (N, H, W) bool, already filtered and deduplicated.
+        image is (H, W, 3) uint8 RGB. Returns (masks, scores, levels) where
+        masks is (N, H, W) bool, already filtered and deduplicated, and levels
+        is a per-mask granularity index or None when the backend has no such
+        notion. SAM's decoder emits subpart/part/whole per prompt point;
+        keeping that distinction lets downstream supervision use the hierarchy.
 
         image_path is the file the array came from, when the caller has it.
         SAM 3.1 cannot segment an in-memory array — build_sam3_image_model

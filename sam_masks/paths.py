@@ -70,6 +70,6 @@ def scene_sparse_dir(scene, root=DATASET_ROOT):
 def arm_dir(output_root, scene, model, mode):
     """Return the output directory for one experiment arm.
 
-    model is "sam31" or "sam21"; mode is "video" or "image".
+    model is "sam31", "sam21" or "sam21_levels"; mode is "video" or "image".
     """
     return Path(output_root) / scene / f"{model}_{mode}"

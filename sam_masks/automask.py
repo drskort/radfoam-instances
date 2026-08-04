@@ -91,13 +91,15 @@ def _iou_boxed(a, b, area_a, area_b, box_a, box_b):
     return float(intersection / union) if union else 0.0
 
 
-def filter_and_dedupe(masks, scores, config):
-    """Score-filter, NMS-deduplicate and top-K a set of candidate masks.
+def select_masks(masks, scores, config):
+    """Return the indices kept by score filtering, NMS and top-K, best first.
 
-    Returns (kept_masks, kept_scores) with masks ordered by descending score.
+    Split out from filter_and_dedupe so callers carrying per-mask side data --
+    the SAM decoder level, for instance -- can apply the identical selection
+    rather than reimplementing it and risking divergence.
     """
     if masks.shape[0] == 0:
-        return masks, []
+        return []
 
     scores = np.asarray(scores, dtype=np.float64)
     areas = masks.reshape(masks.shape[0], -1).sum(axis=1)
@@ -118,9 +120,18 @@ def filter_and_dedupe(masks, scores, config):
         if len(selected) >= config.top_k:
             break
 
+    return selected
+
+
+def filter_and_dedupe(masks, scores, config):
+    """Score-filter, NMS-deduplicate and top-K a set of candidate masks.
+
+    Returns (kept_masks, kept_scores) with masks ordered by descending score.
+    """
+    selected = select_masks(masks, scores, config)
     if not selected:
         return np.zeros((0, *masks.shape[1:]), dtype=bool), []
-
+    scores = np.asarray(scores, dtype=np.float64)
     return masks[selected], [float(scores[i]) for i in selected]
 
 

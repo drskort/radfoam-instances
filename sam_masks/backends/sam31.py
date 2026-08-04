@@ -252,8 +252,11 @@ class Sam31Backend(Backend):
                     areas = masks.reshape(masks.shape[0], -1).sum(axis=1)
                     scores = areas / float(height * width)
                     config = dataclasses.replace(self.config, pred_iou_thresh=0.0)
-                    return filter_and_dedupe(masks, scores, config)
-                return np.zeros((0, height, width), dtype=bool), []
+                    kept, kept_scores = filter_and_dedupe(masks, scores, config)
+                    # SAM 3.1's tracker returns one mask per prompt point;
+                    # it has no multi-level decoder output to preserve.
+                    return kept, kept_scores, None
+                return np.zeros((0, height, width), dtype=bool), [], None
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 

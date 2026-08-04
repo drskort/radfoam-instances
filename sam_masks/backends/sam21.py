@@ -9,7 +9,7 @@ NO-GO (it did not).
 import numpy as np
 import torch
 
-from sam_masks.automask import AutomaskConfig, filter_and_dedupe
+from sam_masks.automask import AutomaskConfig, select_masks
 from sam_masks.backends.base import Backend, Session
 
 DEFAULT_CHECKPOINT = "facebook/sam2.1-hiera-large"
@@ -90,7 +90,7 @@ class Sam21Backend(Backend):
 
     def __init__(
         self, checkpoint=DEFAULT_CHECKPOINT, config=None, device="cuda",
-        max_objects=None, offload_video=True,
+        max_objects=None, offload_video=True, levels=False,
     ):
         # max_objects is accepted and ignored: SAM 2 has no equivalent cap. The
         # runners pass it uniformly so SAM 3.1's builder default of 16 gets raised.
@@ -100,26 +100,49 @@ class Sam21Backend(Backend):
         self.config = config or AutomaskConfig()
         self.device = device
         self.offload_video = offload_video
+        self.levels = levels
         self._image_model = build_sam2_hf(checkpoint, device=device)
-        self._generator = SAM2AutomaticMaskGenerator(
-            self._image_model,
-            points_per_side=self.config.points_per_side,
-            pred_iou_thresh=self.config.pred_iou_thresh,
-            stability_score_thresh=self.config.stability_thresh,
-            box_nms_thresh=self.config.nms_iou_thresh,
-        )
+        if levels:
+            # Keeps SAM's subpart/part/whole decoder outputs distinct instead of
+            # flattening them, so downstream supervision can use the hierarchy.
+            from sam_masks.backends.sam_levels import build_level_aware_generator
+
+            self._generator = build_level_aware_generator(self._image_model, self.config)
+        else:
+            self._generator = SAM2AutomaticMaskGenerator(
+                self._image_model,
+                points_per_side=self.config.points_per_side,
+                pred_iou_thresh=self.config.pred_iou_thresh,
+                stability_score_thresh=self.config.stability_thresh,
+                box_nms_thresh=self.config.nms_iou_thresh,
+            )
         self._video_predictor = build_sam2_video_predictor_hf(checkpoint, device=device)
 
     def propose_masks(self, image, image_path=None):
         # image_path is unused: SAM 2's generator works on in-memory arrays.
-        records = self._generator.generate(image)
-        if not records:
-            return np.zeros((0, *image.shape[:2]), dtype=bool), []
-        masks = np.stack([r["segmentation"] for r in records]).astype(bool)
-        scores = np.array([r["predicted_iou"] for r in records])
+        if self.levels:
+            from sam_masks.backends.sam_levels import generate_with_levels
+
+            masks, scores, levels = generate_with_levels(self._generator, image)
+        else:
+            records = self._generator.generate(image)
+            if not records:
+                return np.zeros((0, *image.shape[:2]), dtype=bool), [], None
+            masks = np.stack([r["segmentation"] for r in records]).astype(bool)
+            scores = np.array([r["predicted_iou"] for r in records])
+            levels = None
+
+        if masks.shape[0] == 0:
+            return np.zeros((0, *image.shape[:2]), dtype=bool), [], None
+
         # Re-run our own filtering so both arms share identical post-processing,
-        # including the top_k cap the upstream generator does not apply.
-        return filter_and_dedupe(masks, scores, self.config)
+        # including the top_k cap the upstream generator does not apply. Levels
+        # ride along on the same selection so they cannot drift out of step.
+        selected = select_masks(masks, scores, self.config)
+        if not selected:
+            return np.zeros((0, *image.shape[:2]), dtype=bool), [], None
+        kept_levels = [int(levels[i]) for i in selected] if levels is not None else None
+        return masks[selected], [float(scores[i]) for i in selected], kept_levels
 
     def start_session(self, frames_dir):
         return Sam21Session(

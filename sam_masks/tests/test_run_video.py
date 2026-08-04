@@ -155,7 +155,7 @@ class _FakeBackend:
         masks = np.zeros((self.n_proposals, 4, 4), dtype=bool)
         for i in range(self.n_proposals):
             masks[i, i % 4, i % 4] = True
-        return masks, [0.9] * self.n_proposals
+        return masks, [0.9] * self.n_proposals, None
 
     def start_session(self, frames_dir):
         return self.session

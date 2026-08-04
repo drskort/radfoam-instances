@@ -34,6 +34,9 @@ class FrameMasks:
     obj_ids: list
     scores: list
     shape: tuple
+    # Optional per-mask granularity level (SAM's decoder emits subpart / part /
+    # whole per prompt point). None when the backend has no notion of levels.
+    levels: list = None
 
     def __len__(self):
         return len(self.obj_ids)
@@ -41,6 +44,11 @@ class FrameMasks:
 
 def _validate(frame):
     n = len(frame.obj_ids)
+    if frame.levels is not None and len(frame.levels) != n:
+        raise ValueError(
+            f"levels must be the same length as obj_ids, got "
+            f"{len(frame.levels)} and {n}"
+        )
     if frame.masks.shape[0] != n or len(frame.scores) != n:
         raise ValueError(
             "masks, obj_ids and scores must be the same length, got "
@@ -85,17 +93,40 @@ def save_frame(arm_dir, frame):
     (arm_dir / "labels").mkdir(parents=True, exist_ok=True)
 
     rles = _encode(frame.masks)
-    np.savez_compressed(
-        arm_dir / "masks" / f"{frame.frame_idx:06d}.npz",
-        counts=np.array([r["counts"] for r in rles], dtype=object),
-        obj_ids=np.array(frame.obj_ids, dtype=np.int64),
-        scores=np.array(frame.scores, dtype=np.float32),
-        shape=np.array(frame.shape, dtype=np.int64),
-    )
+    payload = {
+        "counts": np.array([r["counts"] for r in rles], dtype=object),
+        "obj_ids": np.array(frame.obj_ids, dtype=np.int64),
+        "scores": np.array(frame.scores, dtype=np.float32),
+        "shape": np.array(frame.shape, dtype=np.int64),
+    }
+    if frame.levels is not None:
+        payload["levels"] = np.array(frame.levels, dtype=np.int64)
+    np.savez_compressed(arm_dir / "masks" / f"{frame.frame_idx:06d}.npz", **payload)
 
+    # Flat label map over every mask, whatever its level.
     Image.fromarray(_paint_labels(frame)).save(
         arm_dir / "labels" / f"{frame.frame_idx:06d}.png"
     )
+
+    # One label map per granularity level. A contrastive instance loss is
+    # supervised per view from a label map, and supervising at several
+    # granularities lets the learned embedding carry the part/whole hierarchy
+    # instead of being forced to commit to one reading of it.
+    if frame.levels is not None:
+        for level in sorted(set(int(v) for v in frame.levels)):
+            keep = [i for i, v in enumerate(frame.levels) if int(v) == level]
+            sub = FrameMasks(
+                frame_idx=frame.frame_idx,
+                masks=frame.masks[keep],
+                obj_ids=[frame.obj_ids[i] for i in keep],
+                scores=[frame.scores[i] for i in keep],
+                shape=frame.shape,
+            )
+            out = arm_dir / f"labels_l{level}"
+            out.mkdir(parents=True, exist_ok=True)
+            Image.fromarray(_paint_labels(sub)).save(
+                out / f"{frame.frame_idx:06d}.png"
+            )
 
 
 def load_frame(arm_dir, frame_idx):
@@ -113,12 +144,14 @@ def load_frame(arm_dir, frame_idx):
     else:
         masks = np.zeros((0, *shape), dtype=bool)
 
+    levels = [int(v) for v in data["levels"]] if "levels" in data.files else None
     return FrameMasks(
         frame_idx=frame_idx,
         masks=masks,
         obj_ids=obj_ids,
         scores=[float(v) for v in data["scores"]],
         shape=shape,
+        levels=levels,
     )
 
 

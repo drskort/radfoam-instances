@@ -67,7 +67,9 @@ def run(scene, model, output_root=None, config=None, limit=None, force=False):
     for frame_idx, name in tqdm(todo, desc=f"{scene}/{model}/image"):
         try:
             image = np.array(Image.open(source / name).convert("RGB"))
-            masks, scores = backend.propose_masks(image, image_path=source / name)
+            masks, scores, levels = backend.propose_masks(
+                image, image_path=source / name
+            )
             save_frame(
                 out,
                 FrameMasks(
@@ -76,6 +78,7 @@ def run(scene, model, output_root=None, config=None, limit=None, force=False):
                     obj_ids=list(range(1, masks.shape[0] + 1)),
                     scores=scores,
                     shape=image.shape[:2],
+                    levels=levels,
                 ),
             )
         except Exception as exc:  # keep a multi-hour job alive
@@ -118,7 +121,7 @@ def run(scene, model, output_root=None, config=None, limit=None, force=False):
 def main():
     parser = argparse.ArgumentParser(description="Run the per-image segmentation arm.")
     parser.add_argument("--scene", required=True)
-    parser.add_argument("--model", required=True, choices=["sam21", "sam31"])
+    parser.add_argument("--model", required=True, choices=["sam21", "sam21_levels", "sam31"])
     parser.add_argument("--output-root", default=None)
     parser.add_argument("--limit", type=int, default=None,
                         help="Process only the first N frames (for smoke tests).")

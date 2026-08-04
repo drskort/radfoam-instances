@@ -109,3 +109,55 @@ def test_meta_round_trips(tmp_path):
 def test_meta_is_readable_json(tmp_path):
     write_meta(tmp_path, {"model": "sam21"})
     assert json.loads((tmp_path / "meta.json").read_text())["model"] == "sam21"
+
+
+def test_levels_round_trip(tmp_path):
+    masks = np.stack([circle_mask(20, 20, 5, 5, 3), circle_mask(20, 20, 14, 14, 6)])
+    frame = FrameMasks(
+        frame_idx=0, masks=masks, obj_ids=[1, 2], scores=[0.9, 0.8],
+        shape=(20, 20), levels=[0, 2],
+    )
+
+    save_frame(tmp_path, frame)
+    loaded = load_frame(tmp_path, 0)
+
+    assert loaded.levels == [0, 2]
+
+
+def test_absent_levels_stay_absent(tmp_path):
+    m = np.zeros((1, 8, 8), dtype=bool)
+    m[0, 1:4, 1:4] = True
+    save_frame(tmp_path, FrameMasks(
+        frame_idx=0, masks=m, obj_ids=[1], scores=[0.5], shape=(8, 8)))
+
+    assert load_frame(tmp_path, 0).levels is None
+
+
+def test_one_label_map_written_per_level(tmp_path):
+    masks = np.stack([circle_mask(20, 20, 5, 5, 3), circle_mask(20, 20, 14, 14, 6)])
+    frame = FrameMasks(
+        frame_idx=3, masks=masks, obj_ids=[1, 2], scores=[0.9, 0.8],
+        shape=(20, 20), levels=[0, 2],
+    )
+
+    save_frame(tmp_path, frame)
+
+    from PIL import Image
+
+    assert (tmp_path / "labels" / "000003.png").exists(), "flat map still written"
+    l0 = np.array(Image.open(tmp_path / "labels_l0" / "000003.png"))
+    l2 = np.array(Image.open(tmp_path / "labels_l2" / "000003.png"))
+    # Each level map contains only that level's objects.
+    assert set(np.unique(l0)) == {0, 1}
+    assert set(np.unique(l2)) == {0, 2}
+    assert not (tmp_path / "labels_l1").exists(), "no masks at level 1, no map"
+
+
+def test_rejects_levels_of_wrong_length(tmp_path):
+    masks = np.zeros((2, 8, 8), dtype=bool)
+    frame = FrameMasks(
+        frame_idx=0, masks=masks, obj_ids=[1, 2], scores=[0.5, 0.5],
+        shape=(8, 8), levels=[0],
+    )
+    with pytest.raises(ValueError, match="levels must be the same length"):
+        save_frame(tmp_path, frame)

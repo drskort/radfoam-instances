@@ -29,7 +29,7 @@ class FakeBackend(Backend):
     name = "fake"
 
     def propose_masks(self, image, image_path=None):
-        return np.ones((1, 4, 4), dtype=bool), [0.9]
+        return np.ones((1, 4, 4), dtype=bool), [0.9], None
 
     def start_session(self, frames_dir):
         return FakeSession()
@@ -40,9 +40,12 @@ def test_backend_exposes_a_name():
 
 
 def test_propose_masks_returns_masks_and_scores():
-    masks, scores = FakeBackend().propose_masks(np.zeros((4, 4, 3), dtype=np.uint8))
+    masks, scores, levels = FakeBackend().propose_masks(
+        np.zeros((4, 4, 3), dtype=np.uint8)
+    )
     assert masks.shape == (1, 4, 4)
     assert scores == [0.9]
+    assert levels is None
 
 
 def test_add_masks_returns_one_id_per_mask():
