@@ -102,10 +102,11 @@ def run(
     stale_after=DEFAULT_STALE_AFTER,
     limit=None,
     force=False,
+    tag=None,
 ):
     config = config or AutomaskConfig()
     output_root = Path(output_root) if output_root else resolve_output_root()
-    out = arm_dir(output_root, scene, model, "video")
+    out = arm_dir(output_root, scene, model, "video", tag=tag)
     out.mkdir(parents=True, exist_ok=True)
 
     source = scene_image_dir(scene)
@@ -262,6 +263,7 @@ def run(
             "objects_per_frame": counts,
             "frames_written": len(counts),
             "config": vars(config),
+            "tag": tag,
             "elapsed_s": round(time.time() - started, 1),
             "complete": len(counts) == len(names),
         },
@@ -282,6 +284,9 @@ def main():
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--force", action="store_true",
                         help="Recompute even if the arm is already complete.")
+    parser.add_argument("--tag", default=None,
+                        help="Suffix the output directory, to keep runs at "
+                             "different settings side by side.")
     args = parser.parse_args()
 
     out = run(
@@ -294,6 +299,7 @@ def main():
         stale_after=args.stale_after,
         limit=args.limit,
         force=args.force,
+        tag=args.tag,
     )
     print(json.dumps({"output": str(out)}))
 
