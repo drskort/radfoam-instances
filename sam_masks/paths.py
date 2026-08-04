@@ -67,9 +67,12 @@ def scene_sparse_dir(scene, root=DATASET_ROOT):
     return Path(root) / scene / "sparse" / "0"
 
 
-def arm_dir(output_root, scene, model, mode):
+def arm_dir(output_root, scene, model, mode, tag=None):
     """Return the output directory for one experiment arm.
 
-    model is "sam31", "sam21" or "sam21_levels"; mode is "video" or "image".
+    model is "sam1", "sam21", "sam21_levels" or "sam31"; mode is "video" or
+    "image". tag distinguishes runs of the same arm under different settings --
+    a denser proposal grid, say -- so they do not overwrite each other.
     """
-    return Path(output_root) / scene / f"{model}_{mode}"
+    name = f"{model}_{mode}" if tag is None else f"{model}_{mode}_{tag}"
+    return Path(output_root) / scene / name

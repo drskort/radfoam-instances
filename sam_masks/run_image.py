@@ -27,7 +27,8 @@ from sam_masks.paths import (
 from sam_masks.store import FrameMasks, read_meta, save_frame, write_meta
 
 
-def run(scene, model, output_root=None, config=None, limit=None, force=False):
+def run(scene, model, output_root=None, config=None, limit=None, force=False,
+        tag=None):
     """Segment every frame independently.
 
     Frames whose .npz already exists are skipped unless force is set. This arm
@@ -39,7 +40,7 @@ def run(scene, model, output_root=None, config=None, limit=None, force=False):
     """
     config = config or AutomaskConfig()
     output_root = Path(output_root) if output_root else resolve_output_root()
-    out = arm_dir(output_root, scene, model, "image")
+    out = arm_dir(output_root, scene, model, "image", tag=tag)
     out.mkdir(parents=True, exist_ok=True)
 
     source = scene_image_dir(scene)
@@ -106,6 +107,7 @@ def run(scene, model, output_root=None, config=None, limit=None, force=False):
             "n_computed": len(todo),
             "n_skipped": skipped,
             "config": vars(config),
+            "tag": tag,
             "failures": previous.get("failures", []) + failures,
             "elapsed_s": round(
                 previous.get("elapsed_s", 0.0) + time.time() - started, 1
@@ -127,10 +129,23 @@ def main():
                         help="Process only the first N frames (for smoke tests).")
     parser.add_argument("--force", action="store_true",
                         help="Recompute frames that already have output.")
+    parser.add_argument("--points-per-side", type=int, default=None,
+                        help="Override the proposal grid density.")
+    parser.add_argument("--top-k", type=int, default=None,
+                        help="Override the cap on kept masks per frame.")
+    parser.add_argument("--tag", default=None,
+                        help="Suffix the output directory, to keep runs at "
+                             "different settings side by side.")
     args = parser.parse_args()
 
-    out = run(args.scene, args.model, args.output_root, limit=args.limit,
-              force=args.force)
+    config = AutomaskConfig()
+    if args.points_per_side is not None:
+        config.points_per_side = args.points_per_side
+    if args.top_k is not None:
+        config.top_k = args.top_k
+
+    out = run(args.scene, args.model, args.output_root, config=config,
+              limit=args.limit, force=args.force, tag=args.tag)
     print(json.dumps({"output": str(out)}))
 
 

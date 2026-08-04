@@ -39,6 +39,11 @@ ARMS = [
     ("sam31", "image"),
     ("sam21", "video"),
     ("sam21", "image"),
+    # sam1 is the model OpenSplat3D's reference implementation uses, and is
+    # image-only (no video predictor). sam21_levels is SAM 2.1 with the decoder
+    # levels kept separate rather than flattened.
+    ("sam1", "image"),
+    ("sam21_levels", "image"),
 ]
 
 # A point labelled in only one view is trivially pure and would drag mean_purity
@@ -212,16 +217,21 @@ def run(scene, output_root=None, seed=0):
         print(f"WARNING: no COLMAP reconstruction for {scene}; metrics skipped")
         return summary_path
 
-    reports, provenance = {}, {}
-    for model, mode in ARMS:
-        path = arm_dir(output_root, scene, model, mode)
-        if not (path / "meta.json").exists():
-            continue
+    # Discover arms on disk rather than working from a fixed list: runs may be
+    # tagged (a denser grid, say) and a hardcoded list would silently omit them.
+    scene_dir = Path(output_root) / scene
+    arm_paths = sorted(
+        d for d in scene_dir.iterdir()
+        if d.is_dir() and (d / "meta.json").exists()
+    ) if scene_dir.exists() else []
 
+    reports, provenance = {}, {}
+    for path in arm_paths:
         meta = read_meta(path)
+        mode = meta.get("mode", "image")
         first_label = path / "labels" / "000000.png"
         if not first_label.exists():
-            print(f"skipping {model}_{mode}: no labels written")
+            print(f"skipping {path.name}: no labels written")
             continue
 
         shape = np.array(Image.open(first_label)).shape
@@ -234,10 +244,10 @@ def run(scene, output_root=None, seed=0):
             by_frame.setdefault(frame_idx, []).append((point_id, row, col))
 
         report = evaluate_arm(path, by_frame, meta["n_frames"], mode=mode, seed=seed)
-        reports[f"{model}_{mode}"] = report
-        provenance[f"{model}_{mode}"] = meta
+        reports[path.name] = report
+        provenance[path.name] = meta
         (path / "report.json").write_text(json.dumps(report, indent=2))
-        print(f"{model}_{mode}: balanced={_fmt(report['cosegmentation']['balanced'])}")
+        print(f"{path.name}: balanced={_fmt(report['cosegmentation']['balanced'])}")
 
     if not reports:
         print(f"no completed arms found for {scene}")
