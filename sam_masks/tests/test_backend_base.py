@@ -77,8 +77,8 @@ class StubSam2Predictor:
     def __init__(self, logits_per_frame):
         self.logits_per_frame = logits_per_frame
 
-    def init_state(self, video_path):
-        return {"video_path": video_path}
+    def init_state(self, video_path, offload_video_to_cpu=False):
+        return {"video_path": video_path, "offload": offload_video_to_cpu}
 
     def add_new_mask(self, inference_state, frame_idx, obj_id, mask):
         return None

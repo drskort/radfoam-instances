@@ -50,7 +50,7 @@ def masks_to_normalized_points(masks):
 
 
 class Sam31Session(Session):
-    def __init__(self, predictor, frames_dir, session_id="s0"):
+    def __init__(self, predictor, frames_dir, session_id="s0", offload_video=True):
         self.predictor = predictor
         self.session_id = session_id
 
@@ -58,9 +58,15 @@ class Sam31Session(Session):
         # TypeError for SAM 3.1 -- Sam3BasePredictor.start_session passes
         # offload_state_to_cpu, which the 3.1 tracker's init_state rejects.
         # Replicate what start_session would have done, minus that argument.
+        #
+        # Decoded frames live on the CPU by default. A long indoor scene at
+        # images_2 (room: 311 frames of ~1557x1038) otherwise puts ~35 GiB of
+        # frame features on the card before any tracking state, and OOMs a 48 GiB
+        # A40 partway through. Keeping them in host memory costs some transfer
+        # time and buys the whole sequence.
         self.state = predictor.model.init_state(
             resource_path=str(frames_dir),
-            offload_video_to_cpu=False,
+            offload_video_to_cpu=offload_video,
             async_loading_frames=predictor.async_loading_frames,
         )
         now = time.time()
@@ -167,11 +173,12 @@ class Sam31Backend(Backend):
     # re-seeding, while staying under the memory cliff. Measured peak is 17.5 GiB
     # at 256 tracked objects and 33.9 GiB at 576; 1024 OOMs a 48 GB A40. The
     # builder's own default is 16, which silently drops most of the grid.
-    def __init__(self, config=None, device="cuda", max_objects=512):
+    def __init__(self, config=None, device="cuda", max_objects=512, offload_video=True):
         from sam3.model_builder import build_sam3_predictor
 
         self.config = config or AutomaskConfig()
         self.device = device
+        self.offload_video = offload_video
 
         # Over the cap, add_prompt returns outputs=None with only a log warning,
         # so an undersized max_objects silently discards part of the grid rather
@@ -256,4 +263,6 @@ class Sam31Backend(Backend):
         return np.stack([grid_x.ravel(), grid_y.ravel()], axis=1)
 
     def start_session(self, frames_dir):
-        return Sam31Session(self._predictor, frames_dir)
+        return Sam31Session(
+            self._predictor, frames_dir, offload_video=self.offload_video
+        )

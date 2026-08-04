@@ -16,7 +16,7 @@ DEFAULT_CHECKPOINT = "facebook/sam2.1-hiera-large"
 
 
 class Sam21Session(Session):
-    def __init__(self, predictor, frames_dir, device="cuda"):
+    def __init__(self, predictor, frames_dir, device="cuda", offload_video=True):
         self.predictor = predictor
         # SAM 2 caches memory features in bfloat16 when prompts are added, then
         # reads them back in memory attention during propagation. Without a
@@ -26,7 +26,11 @@ class Sam21Session(Session):
         self._autocast = torch.autocast(device, dtype=torch.bfloat16)
         self._autocast.__enter__()
         try:
-            self.state = predictor.init_state(video_path=str(frames_dir))
+            # See sam31.py: decoded frames stay on the CPU so a long, large scene
+            # does not exhaust the card before tracking state is allocated.
+            self.state = predictor.init_state(
+                video_path=str(frames_dir), offload_video_to_cpu=offload_video
+            )
         except Exception:
             self._autocast.__exit__(None, None, None)
             raise
@@ -85,7 +89,8 @@ class Sam21Backend(Backend):
     name = "sam21"
 
     def __init__(
-        self, checkpoint=DEFAULT_CHECKPOINT, config=None, device="cuda", max_objects=None
+        self, checkpoint=DEFAULT_CHECKPOINT, config=None, device="cuda",
+        max_objects=None, offload_video=True,
     ):
         # max_objects is accepted and ignored: SAM 2 has no equivalent cap. The
         # runners pass it uniformly so SAM 3.1's builder default of 16 gets raised.
@@ -94,6 +99,7 @@ class Sam21Backend(Backend):
 
         self.config = config or AutomaskConfig()
         self.device = device
+        self.offload_video = offload_video
         self._image_model = build_sam2_hf(checkpoint, device=device)
         self._generator = SAM2AutomaticMaskGenerator(
             self._image_model,
@@ -116,4 +122,7 @@ class Sam21Backend(Backend):
         return filter_and_dedupe(masks, scores, self.config)
 
     def start_session(self, frames_dir):
-        return Sam21Session(self._video_predictor, frames_dir, device=self.device)
+        return Sam21Session(
+            self._video_predictor, frames_dir, device=self.device,
+            offload_video=self.offload_video,
+        )
