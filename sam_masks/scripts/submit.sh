@@ -52,6 +52,13 @@ fi
 # shellcheck disable=SC1091
 source "$REPO/.venv-sam/bin/activate"
 
+# The SAM 3.1 video arm allocates and frees masks for hundreds of tracked
+# objects across a long orbit, which fragments the caching allocator badly: the
+# first pilot run died with 30.9 GiB genuinely allocated but 14.1 GiB reserved
+# and unusable on a 47.4 GiB card. Expandable segments let the allocator return
+# and reshape those blocks instead of stranding them.
+export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
+
 echo "=== $(hostname): $SCENE / $MODEL / $MODE ==="
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 git -C "$REPO" rev-parse --short HEAD
