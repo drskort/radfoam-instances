@@ -133,6 +133,10 @@ def main():
                         help="Override the proposal grid density.")
     parser.add_argument("--top-k", type=int, default=None,
                         help="Override the cap on kept masks per frame.")
+    parser.add_argument("--pred-iou-thresh", type=float, default=None,
+                        help="Override the predicted-IoU filter.")
+    parser.add_argument("--stability-thresh", type=float, default=None,
+                        help="Override the stability-score filter.")
     parser.add_argument("--tag", default=None,
                         help="Suffix the output directory, to keep runs at "
                              "different settings side by side.")
@@ -143,6 +147,10 @@ def main():
         config.points_per_side = args.points_per_side
     if args.top_k is not None:
         config.top_k = args.top_k
+    if args.pred_iou_thresh is not None:
+        config.pred_iou_thresh = args.pred_iou_thresh
+    if args.stability_thresh is not None:
+        config.stability_thresh = args.stability_thresh
 
     out = run(args.scene, args.model, args.output_root, config=config,
               limit=args.limit, force=args.force, tag=args.tag)
