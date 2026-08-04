@@ -59,7 +59,7 @@ def evaluate_arm(arm_path, observations, n_frames, mode="video", seed=0):
     """
     arm_path = Path(arm_path)
     per_frame_labels = {}
-    counts, areas, obj_ids_per_frame = [], [], []
+    counts, areas, obj_ids_per_frame, coverage = [], [], [], []
 
     for frame_idx in range(n_frames):
         label_path = arm_path / "labels" / f"{frame_idx:06d}.png"
@@ -70,6 +70,11 @@ def evaluate_arm(arm_path, observations, n_frames, mode="video", seed=0):
         present = np.unique(labels)
         present = present[present != 0]
         counts.append(len(present))
+        # Fraction of the frame carrying any label. Unlabelled pixels are
+        # ignore_label in a contrastive instance loss, so they contribute
+        # nothing -- coverage bounds how much of each view can supervise at all,
+        # and no consistency score reflects it.
+        coverage.append(float((labels != 0).mean()))
         areas.append([int((labels == v).sum()) for v in present])
         obj_ids_per_frame.append([int(v) for v in present])
 
@@ -84,6 +89,7 @@ def evaluate_arm(arm_path, observations, n_frames, mode="video", seed=0):
             per_frame_labels, rng=np.random.default_rng(seed)
         ),
         "stability": stability_descriptors(counts, areas),
+        "coverage": float(np.mean(coverage)) if coverage else float("nan"),
         "frames_evaluated": len(counts),
     }
     if mode == "video":
@@ -125,8 +131,13 @@ def render_summary(scene, reports, provenance=None):
         "cross-frame identity, so it is n/a for the per-image arms by",
         "construction — those assign ids per frame arbitrarily.",
         "",
-        "| arm | balanced | purity | agreement | same-pair | diff-pair | masks/frame | tracks | frames |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "**`coverage`** is the fraction of each frame carrying any label at all.",
+        "Unlabelled pixels are ignored by a contrastive instance loss, so an arm",
+        "that scores well on a small labelled fraction is supervising less of the",
+        "scene -- read it beside `balanced`, not after it.",
+        "",
+        "| arm | balanced | coverage | purity | agreement | masks/frame | tracks | frames |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for arm, report in reports.items():
         coseg = report.get("cosegmentation", {})
@@ -134,13 +145,12 @@ def render_summary(scene, reports, provenance=None):
         tracks = report.get("tracks") or {}
         purity = report.get("purity")
         lines.append(
-            "| {} | **{}** | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | **{}** | **{}** | {} | {} | {} | {} | {} |".format(
                 arm,
                 _fmt(coseg.get("balanced")),
+                _fmt(report.get("coverage")),
                 _fmt(purity.get("mean_purity")) if purity else "n/a",
                 _fmt(coseg.get("agreement")),
-                _fmt(coseg.get("same_pair_agreement")),
-                _fmt(coseg.get("diff_pair_agreement")),
                 _fmt(stability.get("mean_masks_per_frame")),
                 _fmt(tracks.get("n_tracks")) if tracks else "n/a",
                 _fmt(report.get("frames_evaluated")),

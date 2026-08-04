@@ -176,3 +176,29 @@ def test_summary_renders_the_separation_curve():
     assert "1-2 apart" in text and "6-10 apart" in text
     assert "0.990" in text and "0.710" in text
     assert "undef" in text
+
+
+def test_evaluate_arm_reports_label_coverage(tmp_path):
+    # Two bands covering the whole frame -> coverage 1.0.
+    write_arm(tmp_path, 2)
+    assert evaluate_arm(tmp_path, {}, n_frames=2, mode="image")["coverage"] == 1.0
+
+
+def test_coverage_counts_only_labelled_pixels(tmp_path):
+    m = np.zeros((1, 10, 10), dtype=bool)
+    m[0, :5, :] = True                      # half the frame
+    save_frame(tmp_path, FrameMasks(
+        frame_idx=0, masks=m, obj_ids=[1], scores=[0.9], shape=(10, 10)))
+
+    result = evaluate_arm(tmp_path, {}, n_frames=1, mode="image")
+
+    assert result["coverage"] == pytest.approx(0.5)
+
+
+def test_summary_shows_coverage_beside_balanced():
+    text = render_summary("garden", {
+        "a_image": {"cosegmentation": {"balanced": 0.9}, "coverage": 0.42,
+                    "purity": None, "stability": {}, "tracks": None,
+                    "frames_evaluated": 5},
+    })
+    assert "coverage" in text and "0.420" in text
