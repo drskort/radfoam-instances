@@ -61,3 +61,17 @@ def test_shared_nodes_path_wins_over_node_local_work(tmp_path):
     shared.mkdir(parents=True)
 
     assert resolve_output_root(candidates=[shared, node_local]) == shared
+
+
+def test_lerf_scenes_use_the_train_split_not_all_images():
+    # The benchmark's four held-out views live in images/ but not in
+    # images_train/; masking images/ would leak them into supervision.
+    for scene in ("figurines", "ramen", "teatime"):
+        assert DOWNSAMPLE[scene] == 1
+        assert scene_image_dir(scene).name == "images_train"
+
+
+def test_explicit_root_overrides_the_scene_layout(tmp_path):
+    assert scene_image_dir("figurines", root=tmp_path) == (
+        tmp_path / "figurines" / "images_train"
+    )
