@@ -29,7 +29,7 @@ echo "=== open-vocabulary queries ==="
 # Garden: the objects actually in the scene, plus two that are not, so a
 # uniformly-high score is visible as the failure it would be.
 python scripts/extract_instance_language.py \
-    --checkpoint "$CHECKPOINT" --model "$MODEL" --query \
+    --checkpoint "$CHECKPOINT" --model "$MODEL" --visualise --query \
     "a wooden table" \
     "a potted plant" \
     "a football" \

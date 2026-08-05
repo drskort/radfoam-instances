@@ -116,10 +116,10 @@ def encode_instances(best_views, data, vlm_name, device):
     vlm = AutoModel.from_pretrained(vlm_name).to(device).eval()
 
     height, width = data.img_wh[1], data.img_wh[0]
-    embeddings, kept = [], []
+    embeddings, kept, boxes = [], [], []
     with torch.no_grad():
         for instance_id, views in sorted(best_views.items()):
-            crops = []
+            crops, used = [], []
             for area, view, mask in views:
                 # Larger instances need less context; this mirrors the
                 # reference's dynamic expansion ratio.
@@ -133,6 +133,7 @@ def encode_instances(best_views, data, vlm_name, device):
                 rgb = (data.rgbs[view].reshape(height, width, -1)[r0:r1, c0:c1]
                        .clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
                 crops.append(Image.fromarray(rgb[..., :3]))
+                used.append((int(view), int(r0), int(r1), int(c0), int(c1)))
 
             if not crops:
                 continue
@@ -144,15 +145,41 @@ def encode_instances(best_views, data, vlm_name, device):
                 torch.nn.functional.normalize(features.mean(dim=0), dim=-1)
             )
             kept.append(instance_id)
+            boxes.append(used)
             print(f"\rencoded instance {len(kept)}/{len(best_views)}",
                   end="", flush=True)
     print()
     if not embeddings:
-        return torch.zeros(0), []
-    return torch.stack(embeddings).cpu(), kept
+        return torch.zeros(0), [], []
+    return torch.stack(embeddings).cpu(), kept, boxes
 
 
-def run_query(store, queries, vlm_name, device, top=5):
+def save_matches(store, query, ranked, data, out_dir, top=3):
+    """Write out the crops the winning instances were encoded from.
+
+    A score table alone cannot distinguish "found the table" from "picked an
+    arbitrary instance"; the crop shows which it was.
+    """
+    boxes = store.get("boxes")
+    if not boxes:
+        print("  (store predates crop saving -- re-run the extraction to "
+              "visualise matches)")
+        return
+
+    height, width = data.img_wh[1], data.img_wh[0]
+
+    slug = "".join(c if c.isalnum() else "_" for c in query).strip("_")
+    for rank, j in enumerate(ranked[:top], 1):
+        for view, r0, r1, c0, c1 in boxes[j][:1]:
+            rgb = (data.rgbs[view].reshape(height, width, -1)[r0:r1, c0:c1]
+                   .clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
+            path = out_dir / f"{slug}_{rank}_instance{store['instance_ids'][j]}.png"
+            Image.fromarray(rgb[..., :3]).save(path)
+            print(f"     -> {path}")
+
+
+def run_query(store, queries, vlm_name, device, top=5,
+              visualise=None, dataset_args=None):
     from transformers import AutoModel, AutoProcessor
 
     processor = AutoProcessor.from_pretrained(vlm_name)
@@ -160,6 +187,11 @@ def run_query(store, queries, vlm_name, device, top=5):
 
     embeddings = store["embeddings"].to(device)
     ids = store["instance_ids"]
+    data = None
+    if visualise is not None:
+        visualise.mkdir(parents=True, exist_ok=True)
+        data = DataHandler(dataset_args, rays_per_batch=0, device=device)
+        data.reload(split="train", downsample=min(dataset_args.downsample))
     with torch.no_grad():
         inputs = processor(text=list(queries), padding="max_length",
                            return_tensors="pt").to(device)
@@ -173,6 +205,8 @@ def run_query(store, queries, vlm_name, device, top=5):
         print(f"\n{query!r}")
         for rank, j in enumerate(best.tolist(), 1):
             print(f"  {rank}. instance {ids[j]:4d}   score {row[j].item():.4f}")
+        if data is not None:
+            save_matches(store, query, best.tolist(), data, visualise)
 
 
 def main():
@@ -184,6 +218,9 @@ def main():
                         help="Checkpoint file; point at a numbered snapshot to "
                              "avoid racing a live training run.")
     parser.add_argument("--query", nargs="*", default=None)
+    parser.add_argument("--visualise", action="store_true",
+                        help="With --query, also write the crops that each "
+                             "top match was encoded from.")
     args = parser.parse_args()
 
     device = torch.device("cuda")
@@ -193,7 +230,13 @@ def main():
     if args.query:
         if not store_path.exists():
             raise SystemExit(f"{store_path} not found -- run without --query first")
-        run_query(torch.load(store_path), args.query, args.vlm, device)
+        dataset_args = None
+        out_dir = None
+        if args.visualise:
+            _, dataset_args = load_model(args.checkpoint, device, args.model)
+            out_dir = Path(args.checkpoint) / "language_matches"
+        run_query(torch.load(store_path), args.query, args.vlm, device,
+                  visualise=out_dir, dataset_args=dataset_args)
         return
 
     model, dataset_args = load_model(args.checkpoint, device, args.model)
@@ -210,10 +253,10 @@ def main():
     best_views = collect_instance_views(
         model, data, clustering, device, limit=args.limit_views
     )
-    embeddings, ids = encode_instances(best_views, data, args.vlm, device)
+    embeddings, ids, boxes = encode_instances(best_views, data, args.vlm, device)
     torch.save(
-        {"embeddings": embeddings, "instance_ids": ids, "vlm": args.vlm,
-         "n_clusters": clustering.n_clusters},
+        {"embeddings": embeddings, "instance_ids": ids, "boxes": boxes,
+         "vlm": args.vlm, "n_clusters": clustering.n_clusters},
         store_path,
     )
     print(f"wrote {store_path}: {len(ids)} instances embedded "
