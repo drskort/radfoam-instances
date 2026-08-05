@@ -47,6 +47,19 @@ class PipelineParams(ParamGroup):
         self.densify_factor = 1.15
         self.white_background = True
         self.quantile_weight = 1e-4
+        # Contrastive instance features. instance_weight = 0 disables the loss
+        # entirely; instance_guided_geometry lets it also shape density.
+        # Save model.pt every N iterations, plus a numbered snapshot so
+        # intermediate scenes can be rendered. 0 disables.
+        self.checkpoint_every = 2_000
+        self.instance_weight = 0.1
+        # Iteration at which instance_guided_geometry starts taking effect.
+        # Before it, features are still noise and moving geometry with them
+        # only destabilises the triangulation.
+        self.instance_geometry_from = 2_000
+        self.instance_gamma = 1.0
+        self.instance_pos_weight = 1.0
+        self.instance_neg_weight = 1.0
         self.experiment_name = ""
         self.debug = False
         self.viewer = False
@@ -57,6 +70,8 @@ class ModelParams(ParamGroup):
 
     def __init__(self, parser):
         self.sh_degree = 3
+        self.feat_dim = 16
+        self.instance_guided_geometry = False
         self.init_points = 131_072
         self.final_points = 2_097_152
         self.activation_scale = 1.0

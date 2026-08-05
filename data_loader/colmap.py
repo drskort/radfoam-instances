@@ -46,12 +46,20 @@ class COLMAPDataset:
         names = sorted(im.name for im in self.reconstruction.images.values())
         indices = np.arange(len(names))
 
-        if split == "train":
-            names = list(np.array(names)[indices % 8 != 0])
-        elif split == "test":
-            names = list(np.array(names)[indices % 8 == 0])
-        else:
+        if split not in ("train", "test"):
             raise ValueError(f"Invalid split: {split}")
+
+        if os.path.isdir(os.path.join(datadir, "images_train")):
+            # LERF-Mask ships its own split: images_train/ is the training set
+            # and the graded views are images/test_*.jpg. Falling back to the
+            # every-8th rule here would train on the graded views and score the
+            # model on frames it had already fit.
+            is_test = [os.path.basename(n).startswith("test_") for n in names]
+            names = [n for n, t in zip(names, is_test) if t == (split == "test")]
+        elif split == "train":
+            names = list(np.array(names)[indices % 8 != 0])
+        else:
+            names = list(np.array(names)[indices % 8 == 0])
 
         names = list(str(name) for name in names)
 

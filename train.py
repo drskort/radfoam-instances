@@ -16,6 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from data_loader import DataHandler
 from configs import *
+from radfoam_model.instance_loss import multi_level_instance_loss
 from radfoam_model.scene import RadFoamScene
 from radfoam_model.utils import psnr
 import radfoam
@@ -115,7 +116,7 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
             for i in range(rays.shape[0]):
                 ray_batch = ray_batch_fetcher.next()[0]
                 rgb_batch = rgb_batch_fetcher.next()[0]
-                output, _, _, _, _ = model(ray_batch, start_points[i])
+                output, _, _, _, _, _ = model(ray_batch, start_points[i])
 
                 # White background
                 opacity = output[..., -1:]
@@ -151,8 +152,12 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
 
         torch.cuda.synchronize()
 
+        # The model attribute is toggled per iteration below, so remember what
+        # the run actually asked for.
+        guided_geometry = model.instance_guided_geometry
+
         data_iterator = train_data_handler.get_iter()
-        ray_batch, rgb_batch, alpha_batch = next(data_iterator)
+        ray_batch, rgb_batch, alpha_batch, label_batch = next(data_iterator)
 
         triangulation_update_period = 1
         iters_since_update = 1
@@ -171,7 +176,21 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                         split="train", downsample=downsample
                     )
                     data_iterator = train_data_handler.get_iter()
-                    ray_batch, rgb_batch, alpha_batch = next(data_iterator)
+                    ray_batch, rgb_batch, alpha_batch, label_batch = next(
+                    data_iterator
+                )
+
+                # Features start as noise, so coupling them to geometry from
+                # iteration 0 pushes points around for no reason -- on
+                # figurines that drove the cells into a degenerate
+                # configuration and the incremental Delaunay rebuild died with
+                # an illegal memory access at iteration 195. Let the features
+                # become meaningful first, then let them move geometry.
+                if model.feat_dim > 0:
+                    model.instance_guided_geometry = (
+                        guided_geometry
+                        and i >= pipeline_args.instance_geometry_from
+                    )
 
                 depth_quantiles = (
                     torch.rand(*ray_batch.shape[:-1], 2, device=device)
@@ -179,7 +198,7 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                     .values
                 )
 
-                rgba_output, depth, _, _, _ = model(
+                rgba_output, _feature, depth, _, _, _ = model(
                     ray_batch,
                     depth_quantiles=depth_quantiles,
                 )
@@ -203,6 +222,28 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
 
                 loss = color_loss.mean() + opacity_loss + w_depth * quant_loss
 
+                # Contrastive instance features, supervised per view from the
+                # precomputed SAM label maps. Skipped when no masks are present
+                # or the model carries no feature channels.
+                instance_stats = None
+                if (
+                    label_batch is not None
+                    and model.feat_dim > 0
+                    and pipeline_args.instance_weight > 0
+                ):
+                    instance_stats = multi_level_instance_loss(
+                        _feature,
+                        label_batch.to(torch.long),
+                        gamma=pipeline_args.instance_gamma,
+                        weights=(
+                            pipeline_args.instance_pos_weight,
+                            pipeline_args.instance_neg_weight,
+                        ),
+                    )
+                    loss = loss + (
+                        pipeline_args.instance_weight * instance_stats["total"]
+                    )
+
                 model.optimizer.zero_grad(set_to_none=True)
 
                 # Hide latency of data loading behind the backward pass
@@ -210,7 +251,9 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                 event.record()
                 loss.backward()
                 event.synchronize()
-                ray_batch, rgb_batch, alpha_batch = next(data_iterator)
+                ray_batch, rgb_batch, alpha_batch, label_batch = next(
+                    data_iterator
+                )
 
                 model.optimizer.step()
                 model.update_learning_rate(i)
@@ -219,6 +262,25 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
 
                 if i % 100 == 99 and not pipeline_args.debug:
                     writer.add_scalar("train/rgb_loss", color_loss.mean(), i)
+                    # Is the instance loss actually moving the features? A dead
+                    # gradient here means the loss is not reaching att_feat, and
+                    # shows up in minutes instead of after a full render.
+                    if instance_stats is not None:
+                        writer.add_scalar(
+                            "instance/total", instance_stats["total"], i
+                        )
+                        for key, value in instance_stats.items():
+                            if key.startswith("l") and "_" in key:
+                                writer.add_scalar(f"instance/{key}", value, i)
+                        if model.att_feat.grad is not None:
+                            writer.add_scalar(
+                                "instance/att_feat_grad_norm",
+                                model.att_feat.grad.norm(),
+                                i,
+                            )
+                        writer.add_scalar(
+                            "instance/att_feat_std", model.att_feat.std(), i
+                        )
                     num_points = model.primal_points.shape[0]
                     writer.add_scalar("test/num_points", num_points, i)
 
@@ -291,6 +353,20 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
 
                 if viewer is not None and viewer.is_closed():
                     break
+
+                # Periodic checkpoint. A multi-hour run that only saves at the
+                # end is a single point of failure -- a walltime overrun loses
+                # everything. Also lets intermediate scenes be rendered while
+                # training continues.
+                if (
+                    pipeline_args.checkpoint_every > 0
+                    and (i + 1) % pipeline_args.checkpoint_every == 0
+                ):
+                    model.save_pt(f"{out_dir}/model.pt")
+                    model.save_pt(f"{out_dir}/model_{i + 1:06d}.pt")
+                    train.set_postfix_str(
+                        f"color_loss={color_loss.mean().item():.5f} (saved)"
+                    )
 
         model.save_ply(f"{out_dir}/scene.ply")
         model.save_pt(f"{out_dir}/model.pt")
