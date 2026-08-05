@@ -55,9 +55,36 @@ class DataHandler:
         self.fy = split_dataset.fy
         self.c2ws = split_dataset.poses
         self.rays, self.rgbs = split_dataset.all_rays, split_dataset.all_rgbs
+        # Needed to line renders up with per-image ground truth, e.g. the
+        # LERF-Mask annotations keyed by test view.
+        self.image_names = [im.name for im in getattr(split_dataset, "images", [])]
         self.alphas = getattr(
             split_dataset, "all_alphas", torch.ones_like(self.rgbs[..., 0:1])
         )
+
+        # Instance labels, aligned with self.rays. Absent masks are not an
+        # error -- training simply runs without the instance loss.
+        self.instance_labels = None
+        if split == "train" and getattr(self.args, "instance_masks", True):
+            from radfoam_model.instance_masks import (
+                load_level_labels,
+                resolve_mask_dir,
+            )
+
+            mask_dir = resolve_mask_dir(self.args.scene)
+            if mask_dir is not None:
+                names = [im.name for im in split_dataset.images]
+                self.instance_labels = load_level_labels(
+                    mask_dir, names, self.img_wh
+                )
+                print(
+                    f"instance masks: {mask_dir} "
+                    f"({self.instance_labels.shape[-1]} levels, "
+                    f"{100 * (self.instance_labels >= 0).float().mean():.1f}% "
+                    "of pixels labelled)"
+                )
+            else:
+                print(f"instance masks: none found for {self.args.scene}")
 
         self.viewer_up = get_up(self.c2ws)
         self.viewer_pos = self.c2ws[0, :3, 3]
@@ -106,6 +133,11 @@ class DataHandler:
                 self.train_alphas = einops.rearrange(
                     self.alphas, "n h w 1 -> (n h w) 1"
                 )
+                self.train_instance_labels = (
+                    einops.rearrange(self.instance_labels, "n h w l -> (n h w) l")
+                    if self.instance_labels is not None
+                    else None
+                )
 
                 self.batch_size = self.rays_per_batch
 
@@ -119,10 +151,20 @@ class DataHandler:
         alpha_batch_fetcher = radfoam.BatchFetcher(
             self.train_alphas, self.batch_size, shuffle=True
         )
+        # A fourth fetcher over the same indices keeps labels aligned with the
+        # rays despite the global shuffle.
+        label_fetcher = (
+            radfoam.BatchFetcher(
+                self.train_instance_labels, self.batch_size, shuffle=True
+            )
+            if getattr(self, "train_instance_labels", None) is not None
+            else None
+        )
 
         while True:
             ray_batch = ray_batch_fetcher.next()
             rgb_batch = rgb_batch_fetcher.next()
             alpha_batch = alpha_batch_fetcher.next()
+            label_batch = label_fetcher.next() if label_fetcher else None
 
-            yield ray_batch, rgb_batch, alpha_batch
+            yield ray_batch, rgb_batch, alpha_batch, label_batch
