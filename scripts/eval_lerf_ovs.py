@@ -88,17 +88,43 @@ def main():
                         help="Instances scoring within this fraction of the "
                              "best answer the query too. Their pred_type=max.")
     parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--clustering", default="cached",
+                        choices=["cached", "multicut"],
+                        help="cached = the HDBSCAN-full partition in "
+                             "instances/clustering.pt. multicut = refit with "
+                             "GAEC on the Delaunay graph, which scores 1.0 "
+                             "higher on LERF-Mask.")
+    parser.add_argument("--tau", type=float, default=0.15)
+    parser.add_argument("--min-size", type=int, default=64)
     args = parser.parse_args()
 
     device = torch.device("cuda")
     model, dataset_args = load_model(args.checkpoint, device, args.model)
     scene = dataset_args.scene
 
-    clustering, labels = load_cached_clustering(args.checkpoint, model.att_feat)
-    if clustering is None or labels is None:
-        raise SystemExit("no cached clustering with per-cell labels; run "
-                         "`foamviz.py cluster --method full` first")
-    print(f"{clustering.n_clusters} instances", flush=True)
+    if args.clustering == "multicut":
+        from radfoam_model.instance_graph import (
+            clustering_from_labels,
+            fit_graph_clusters,
+        )
+
+        result = fit_graph_clusters(
+            model.att_feat, model.point_adjacency,
+            model.point_adjacency_offsets, method="multicut",
+            min_size=args.min_size, tau=args.tau, metric="euclidean",
+        )
+        labels = result.labels
+        clustering = clustering_from_labels(model.att_feat, labels)
+        print(f"multicut tau={args.tau}: {clustering.n_clusters} instances "
+              f"({100 * clustering.noise_fraction:.1f}% unassigned)", flush=True)
+    else:
+        clustering, labels = load_cached_clustering(args.checkpoint,
+                                                    model.att_feat)
+        if clustering is None or labels is None:
+            raise SystemExit("no cached clustering with per-cell labels; run "
+                             "`foamviz.py cluster --method full` first")
+        print(f"{clustering.n_clusters} instances", flush=True)
+    labels = labels.to(device)
 
     data = DataHandler(dataset_args, rays_per_batch=0, device=device)
     data.reload(split="train", downsample=min(dataset_args.downsample))
@@ -230,13 +256,16 @@ def main():
           f"max {max(per_query.values())}")
 
     out = (Path(args.checkpoint)
-           / f"lerf_ovs_{Path(args.model).stem}_{args.encoder}.json")
+           / f"lerf_ovs_{Path(args.model).stem}_{args.encoder}"
+             f"{'' if args.clustering == 'cached' else f'_multicut_tau{args.tau}'}"
+             ".json")
     out.write_text(json.dumps(
         {"scene": scene, "miou": mi, "mbiou": mb, "oracle_miou": mo,
          "per_class_iou": per_iou, "oracle": oracle,
          "n_frames": len(views), "n_categories": len(per_iou),
          "flat_miou": flat, "n_instances_per_query": per_query,
-         "encoder": args.encoder,
+         "encoder": args.encoder, "clustering": args.clustering,
+         "n_clusters": clustering.n_clusters,
          "pred_threshold": args.pred_threshold}, indent=2))
     print(f"wrote {out}")
 
