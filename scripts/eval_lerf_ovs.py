@@ -89,11 +89,23 @@ def main():
                              "best answer the query too. Their pred_type=max.")
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--clustering", default="cached",
-                        choices=["cached", "multicut"],
+                        choices=["cached", "multicut", "multicut_logodds",
+                                 "multicut_sam"],
                         help="cached = the HDBSCAN-full partition in "
-                             "instances/clustering.pt. multicut = refit with "
-                             "GAEC on the Delaunay graph, which scores 1.0 "
-                             "higher on LERF-Mask.")
+                             "instances/clustering.pt. multicut = GAEC with "
+                             "the tau surrogate. multicut_logodds = calibrated "
+                             "without labels. multicut_sam = calibrated "
+                             "against SAM mask co-occurrence.")
+    parser.add_argument("--sam-prior", action="store_true",
+                        help="Add the marginal prior log-odds to "
+                             "every edge. Off by default: see "
+                             "multicut_sam.")
+    parser.add_argument("--occupancy", action="store_true",
+                        help="Add edge solidity as a third log-odds term. "
+                             "multicut_sam only.")
+    parser.add_argument("--sam-views", type=int, default=1000,
+                        help="Cap on views used for SAM "
+                             "co-occurrence; the default takes all.")
     parser.add_argument("--tau", type=float, default=0.15)
     parser.add_argument("--min-size", type=int, default=64)
     args = parser.parse_args()
@@ -102,20 +114,54 @@ def main():
     model, dataset_args = load_model(args.checkpoint, device, args.model)
     scene = dataset_args.scene
 
-    if args.clustering == "multicut":
+
+    data = DataHandler(dataset_args, rays_per_batch=0, device=device)
+    data.reload(split="train", downsample=min(dataset_args.downsample))
+
+    if args.clustering.startswith("multicut"):
         from radfoam_model.instance_graph import (
             clustering_from_labels,
             fit_graph_clusters,
         )
 
-        result = fit_graph_clusters(
-            model.att_feat, model.point_adjacency,
-            model.point_adjacency_offsets, method="multicut",
-            min_size=args.min_size, tau=args.tau, metric="euclidean",
-        )
-        labels = result.labels
+        if args.clustering == "multicut_sam":
+            from radfoam_model.instance_graph import (
+                multicut_sam,
+                sam_edge_counts,
+                undirected_edges,
+            )
+            from radfoam_model.instance_masks import resolve_mask_dir
+
+            mask_dir = resolve_mask_dir(scene)
+            if mask_dir is None:
+                raise SystemExit(f"no SAM masks for {scene}")
+            edges = undirected_edges(model.point_adjacency,
+                                     model.point_adjacency_offsets)
+            step = max(1, len(data.image_names) // args.sam_views)
+            agree, disagree = sam_edge_counts(
+                model, data, edges, mask_dir, data.image_names[::step],
+                device, report=True)
+            labels, _, _ = multicut_sam(
+                model.att_feat, edges, agree, disagree,
+                min_size=args.min_size, metric="euclidean", report=True,
+                use_prior=args.sam_prior,
+                occupancy=(model.get_primal_density().detach().float()
+                           .reshape(-1)[edges].min(dim=1).values.cpu().numpy()
+                           if args.occupancy else None),
+            )
+        else:
+            kwargs = (dict(tau=args.tau) if args.clustering == "multicut"
+                      else dict(report=True))
+            result = fit_graph_clusters(
+                model.att_feat, model.point_adjacency,
+                model.point_adjacency_offsets, method=args.clustering,
+                min_size=args.min_size, metric="euclidean", **kwargs,
+            )
+            labels = result.labels
         clustering = clustering_from_labels(model.att_feat, labels)
-        print(f"multicut tau={args.tau}: {clustering.n_clusters} instances "
+        tag = (f"tau={args.tau}" if args.clustering == "multicut"
+               else "calibrated log-odds")
+        print(f"{args.clustering} {tag}: {clustering.n_clusters} instances "
               f"({100 * clustering.noise_fraction:.1f}% unassigned)", flush=True)
     else:
         clustering, labels = load_cached_clustering(args.checkpoint,
@@ -126,8 +172,6 @@ def main():
         print(f"{clustering.n_clusters} instances", flush=True)
     labels = labels.to(device)
 
-    data = DataHandler(dataset_args, rays_per_batch=0, device=device)
-    data.reload(split="train", downsample=min(dataset_args.downsample))
     truth = load_polygons(scene, data.img_wh)
     index = {n: i for i, n in enumerate(data.image_names)}
     views = [n for n in sorted(truth) if n in index]
@@ -255,10 +299,11 @@ def main():
           f"{np.mean(list(per_query.values())):.2f}, "
           f"max {max(per_query.values())}")
 
+    suffix = {"cached": "", "multicut_logodds": "_logodds",
+              "multicut_sam": "_sam" + ("_occ" if args.occupancy else "")}.get(
+        args.clustering, f"_multicut_tau{args.tau}")
     out = (Path(args.checkpoint)
-           / f"lerf_ovs_{Path(args.model).stem}_{args.encoder}"
-             f"{'' if args.clustering == 'cached' else f'_multicut_tau{args.tau}'}"
-             ".json")
+           / f"lerf_ovs_{Path(args.model).stem}_{args.encoder}{suffix}.json")
     out.write_text(json.dumps(
         {"scene": scene, "miou": mi, "mbiou": mb, "oracle_miou": mo,
          "per_class_iou": per_iou, "oracle": oracle,

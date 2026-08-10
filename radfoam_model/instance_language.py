@@ -87,7 +87,7 @@ def square_pad_resize(crop, crop_mask, img_size):
     return crop, crop_mask.squeeze(0)
 
 
-def surface_cells(model, rays, device):
+def surface_cells(model, rays, device, quantiles=(0.5, 0.5)):
     """Index of the cell at the median-transmittance depth, one per ray.
 
     OpenSplat3D counts how many of an instance's Gaussians a view actually
@@ -99,13 +99,19 @@ def surface_cells(model, rays, device):
     """
     points, attributes, adjacency, offsets = model.get_trace_data()
     start = model.get_starting_point(rays, points, model.aabb_tree)
-    quantiles = torch.full((rays.shape[0], 2), 0.5, device=device)
+    q = torch.tensor(quantiles, device=device, dtype=torch.float32)
+    q = q.expand(rays.shape[0], 2).contiguous()
     with torch.no_grad():
         out = model.pipeline.trace_forward(
             points, attributes, adjacency, offsets, rays, start,
-            depth_quantiles=quantiles, return_contribution=False,
+            depth_quantiles=q, return_contribution=False,
         )
-    return out["depth_indices"][:, 0].long()
+    index = out["depth_indices"].long()
+    # Two columns only: the tracer fills exactly num_depth_quantiles slots and
+    # anything past the second is uninitialised memory, which shows up as an
+    # out-of-range index and a device-side assert. Spreading the pair is the
+    # only way to see more than the front surface per ray.
+    return index[:, 0] if quantiles[0] == quantiles[1] else index
 
 
 def rank_views(observations, total_cells):
