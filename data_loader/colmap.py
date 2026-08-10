@@ -54,8 +54,21 @@ class COLMAPDataset:
             # and the graded views are images/test_*.jpg. Falling back to the
             # every-8th rule here would train on the graded views and score the
             # model on frames it had already fit.
-            is_test = [os.path.basename(n).startswith("test_") for n in names]
-            names = [n for n, t in zip(names, is_test) if t == (split == "test")]
+            #
+            # Membership in images_train/ decides it, not the test_ prefix. For
+            # the three Gaussian Grouping scenes those agree exactly. They do
+            # not for waldo_kitchen, which has no benchmark split: its held-out
+            # frames keep their original names, and the every-8th rule cannot
+            # be used there either because it would drop one of the five
+            # LERF-OVS annotated frames out of training.
+            train_dir = os.path.join(datadir, "images_train")
+            in_train = {
+                os.path.basename(n) for n in os.listdir(train_dir)
+            }
+            names = [
+                n for n in names
+                if (os.path.basename(n) in in_train) == (split == "train")
+            ]
         elif split == "train":
             names = list(np.array(names)[indices % 8 != 0])
         else:

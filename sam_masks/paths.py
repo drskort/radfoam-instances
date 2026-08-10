@@ -42,9 +42,11 @@ DOWNSAMPLE = {
     "kitchen": 2,
     "room": 2,
     # LERF-Mask ships a single ~986x728 resolution, so no downsampling.
+    # waldo_kitchen is the fourth LERF-OVS scene and matches at 985x725.
     "figurines": 1,
     "ramen": 1,
     "teatime": 1,
+    "waldo_kitchen": 1,
 }
 
 # Scenes that do not follow mip-NeRF 360's <root>/<scene>/images_<n> layout.
@@ -53,9 +55,12 @@ DOWNSAMPLE = {
 # holds four views out of images/ as test_N.jpg and grades against test_mask/.
 # Generating masks over images/ would put the graded views into supervision and
 # quietly inflate every number the benchmark reports.
+# waldo_kitchen has no benchmark split of its own, so its images_train is
+# symlinks to every frame -- LERF-OVS evaluates on training views. See the
+# README in that scene directory.
 SCENE_LAYOUT = {
     scene: (LERF_ROOT, "images_train")
-    for scene in ("figurines", "ramen", "teatime")
+    for scene in ("figurines", "ramen", "teatime", "waldo_kitchen")
 }
 
 
