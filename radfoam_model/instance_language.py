@@ -1,10 +1,10 @@
 """Per-instance language embeddings, following OpenSplat3D's recipe exactly.
 
 Reproduced from VisualComputingInstitute/opensplat3d (language/embed.py,
-language/utils.py) and their configs/lerf.yaml. The differences from the first
-implementation in extract_instance_language.py are the whole point -- measured
-on LERF-OVS, retrieval was costing 29 mIoU against an oracle of 78.4, and these
-are the four things they do differently:
+language/utils.py, language/lang_model.py) and their configs/lerf.yaml. The
+differences from the first implementation in extract_instance_language.py are
+the whole point -- measured on LERF-OVS, retrieval was costing 29 mIoU against
+an oracle of 78.4, and these are what they do differently:
 
   * THREE crop levels per view, not one. Level 0 is the tight box; level i
     expands each side by width * ratio * (i + 1), so at ratio 0.3 the crops are
@@ -13,16 +13,29 @@ are the four things they do differently:
   * view ranking by (visible primitives / instance primitives) * (area / max
     area), not by projected area alone. The first term is what stops a mostly
     occluded instance winning on silhouette size.
+  * each crop is padded to a SQUARE before the resize, so the encoder never
+    sees a stretched object. Handing a rectangular crop straight to a
+    processor resizes anisotropically instead, which is what the first version
+    here did.
+  * queries are wrapped in "an image of {}", not fed bare.
   * mean over all top-k crops AND all levels, after L2 normalising each.
-  * siglip-so400m-patch14-384, which is their `siglip` option. MasQCLIP is
-    their default but needs ckpts/MasQCLIP/base_novel.pth, which is not
-    published.
+
+Two encoders. `masqclip` is their default and needs the published
+base_novel.pth; it takes the crop AND the instance's mask inside that crop, so
+the object is identified to the encoder rather than merely centred. `siglip`
+(siglip-so400m-patch14-384) is their fallback and sees the crop alone.
 """
+
+import math
 
 import numpy as np
 import torch
+import torchvision.transforms.functional as TF
 
-MODEL = "google/siglip-so400m-patch14-384"
+SIGLIP = "google/siglip-so400m-patch14-384"
+MASQCLIP_CKPT = "ckpts/MasQCLIP/base_novel.pth"
+IMG_SIZE = {"siglip": (384, 384), "masqclip": (336, 336)}
+PROMPT = "an image of {}"
 TOPK = 5
 LEVELS = 3
 RATIO = 0.3
@@ -32,10 +45,12 @@ MIN_PIXELS = 64
 
 
 def multi_level_boxes(mask, levels=LEVELS, ratio=RATIO):
-    """Tight box plus `levels - 1` progressively wider ones.
+    """Tight box plus `levels - 1` progressively wider ones, as (r0, r1, c0, c1).
 
     Follows OpenMask3D via OpenSplat3D: expansion for level i is
-    width * ratio * (i + 1), applied to each side.
+    width * ratio * (i + 1), applied to each side. Bounds are half-open here;
+    theirs are inclusive pixel coordinates that they slice with y2 + 1, which
+    is the same extent.
     """
     rows, cols = np.flatnonzero(mask.any(1)), np.flatnonzero(mask.any(0))
     if rows.size == 0:
@@ -51,6 +66,25 @@ def multi_level_boxes(mask, levels=LEVELS, ratio=RATIO):
             max(0, c0 - x_exp * level), min(w, c1 + x_exp * level),
         ))
     return boxes
+
+
+def square_pad_resize(crop, crop_mask, img_size):
+    """Zero-pad to a square, centred, then resize crop and mask together.
+
+    crop is uint8 (3, h, w), crop_mask bool (h, w). Without the pad an object
+    in a wide box reaches the encoder horizontally squashed, and the mask no
+    longer lines up with the patch grid the attention mask is built from.
+    """
+    _, h, w = crop.shape
+    side = max(h, w)
+    pt, pl = (side - h) // 2, (side - w) // 2
+    pad = [pl, pt, math.ceil((side - w) / 2), math.ceil((side - h) / 2)]
+    crop = TF.resize(TF.pad(crop, pad), list(img_size))
+    crop_mask = TF.resize(
+        TF.pad(crop_mask.unsqueeze(0), pad), list(img_size),
+        interpolation=TF.InterpolationMode.NEAREST,
+    )
+    return crop, crop_mask.squeeze(0)
 
 
 def surface_cells(model, rays, device):
@@ -89,44 +123,77 @@ def rank_views(observations, total_cells):
     )[:TOPK]
 
 
-def embed_instances(crops_per_instance, device, model_name=MODEL, batch=32):
-    """One L2-normalised embedding per instance: mean over crops and levels."""
-    from PIL import Image  # noqa: F401  (callers pass PIL images)
-    from transformers import AutoModel, AutoProcessor
+class LanguageEncoder:
+    """Whichever of OpenSplat3D's two published encoders is asked for."""
 
-    processor = AutoProcessor.from_pretrained(model_name)
-    vlm = AutoModel.from_pretrained(model_name).to(device).eval()
+    def __init__(self, kind, device, ckpt=MASQCLIP_CKPT):
+        self.kind = kind
+        self.device = device
+        self.img_size = IMG_SIZE[kind]
+        if kind == "siglip":
+            from transformers import AutoModel, AutoProcessor
 
-    embeddings, kept = [], []
-    for n, (instance, crops) in enumerate(sorted(crops_per_instance.items())):
-        if not crops:
-            continue
-        feats = []
-        for start in range(0, len(crops), batch):
-            inputs = processor(images=crops[start:start + batch],
-                               return_tensors="pt").to(device)
-            with torch.no_grad():
-                f = vlm.get_image_features(**inputs)
-            feats.append(torch.nn.functional.normalize(f, dim=-1))
-        pooled = torch.cat(feats).mean(dim=0)
-        embeddings.append(torch.nn.functional.normalize(pooled, dim=-1))
-        kept.append(instance)
-        if n % 25 == 0:
-            print(f"\r  embedded {n + 1}/{len(crops_per_instance)}",
-                  end="", flush=True)
-    print()
-    if not embeddings:
-        return torch.zeros(0), []
-    return torch.stack(embeddings).cpu(), kept
+            self.processor = AutoProcessor.from_pretrained(SIGLIP)
+            self.model = AutoModel.from_pretrained(SIGLIP).to(device).eval()
+        elif kind == "masqclip":
+            from third_party.masqclip import MasQCLIP
+
+            self.model = MasQCLIP(["ViT-L/14@336px"])
+            missing = self.model.from_pretrained(ckpt)
+            # Only the `masqclip.` subtree is in the checkpoint, so the stock
+            # CLIP text tower shows up as "missing" and must stay that way.
+            loaded = [k for k in missing.missing_keys if k.startswith("visual.")]
+            if loaded:
+                raise RuntimeError(
+                    f"{ckpt} did not supply {len(loaded)} visual weights, "
+                    f"e.g. {loaded[:3]} -- wrong checkpoint?"
+                )
+            self.model = self.model.to(device).eval()
+        else:
+            raise ValueError(kind)
+
+    @torch.no_grad()
+    def encode_crops(self, crops, masks):
+        """crops: list of uint8 (3, H, W); masks: list of bool (H, W)."""
+        batch = torch.stack(crops).to(self.device)
+        if self.kind == "siglip":
+            images = [c.permute(1, 2, 0).cpu().numpy() for c in batch]
+            inputs = self.processor(images=images, return_tensors="pt")
+            feats = self.model.get_image_features(
+                **{k: v.to(self.device) for k, v in inputs.items()})
+        else:
+            # One mask per crop, so each image carries a single query token.
+            pixels = self.model.preprocess_images(batch.float().div(255.0))
+            m = torch.stack(masks).to(self.device).unsqueeze(1).float()
+            feats = self.model.get_image_embedding(pixels, m).squeeze(1)
+        return torch.nn.functional.normalize(feats.float(), dim=-1)
+
+    @torch.no_grad()
+    def encode_text(self, queries):
+        prompts = [PROMPT.format(q) for q in queries]
+        if self.kind == "siglip":
+            inputs = self.processor(text=prompts, padding="max_length",
+                                    return_tensors="pt").to(self.device)
+            text = self.model.get_text_features(**inputs)
+        else:
+            text = self.model.get_text_embedding(prompts)
+        return torch.nn.functional.normalize(text.float(), dim=-1)
 
 
-def encode_text(queries, device, model_name=MODEL):
-    from transformers import AutoModel, AutoProcessor
+def select_instances(scores, threshold=0.85):
+    """Which instances answer each query. Multi-instance, as OpenSplat3D does.
 
-    processor = AutoProcessor.from_pretrained(model_name)
-    vlm = AutoModel.from_pretrained(model_name).to(device).eval()
-    with torch.no_grad():
-        inputs = processor(text=list(queries), padding="max_length",
-                           return_tensors="pt").to(device)
-        text = vlm.get_text_features(**inputs)
-    return torch.nn.functional.normalize(text, dim=-1)
+    Their default is pred_type="max": shift each query's scores so the worst
+    instance sits at zero, then keep everything within `threshold` of the best.
+    A query is allowed to claim several instances, which is what lets a
+    category that the clustering split across parts still be recovered whole.
+    Rows of `scores` are queries, columns instances.
+
+    They rescale by the model's logit scale first. Skipped here: it is a
+    positive affine map applied to a whole row, and both the shift by the row
+    minimum and the comparison against threshold * row maximum are invariant
+    to it.
+    """
+    shifted = scores - scores.min(axis=1, keepdims=True)
+    keep = shifted >= shifted.max(axis=1, keepdims=True) * threshold
+    return [np.flatnonzero(row) for row in keep]

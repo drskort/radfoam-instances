@@ -35,23 +35,17 @@ from eval_lerf_mask import boundary_iou, iou  # noqa: E402
 from radfoam_model.instance_language import (  # noqa: E402
     DYNAMIC_RATIO,
     MIN_PIXELS,
-    MODEL as OS3D_MODEL,
     RATIO,
     SMALL_AREA,
-    embed_instances,
-    encode_text,
+    LanguageEncoder,
     multi_level_boxes,
     rank_views,
+    select_instances,
+    square_pad_resize,
     surface_cells,
 )
-from extract_instance_language import (  # noqa: E402
-    DEFAULT_VLM,
-    collect_instance_views,
-    encode_instances,
-    load_model,
-)
+from extract_instance_language import load_model  # noqa: E402
 
-TOPK_NOTE = "top-5 views x 3 levels"
 LABEL_ROOT = Path("/nodes/host/work/user/lerf_ovs/lerf_ovs/label")
 
 
@@ -85,13 +79,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--model", default="model.pt")
-    parser.add_argument("--recipe", default="opensplat3d",
-                        choices=["opensplat3d", "legacy"],
-                        help="opensplat3d = 3 crop levels, visibility-weighted "
-                             "view ranking, siglip-so400m. legacy = the "
-                             "original single-crop SigLIP2 path.")
-    parser.add_argument("--vlm", default=None)
-    parser.add_argument("--top-k", type=int, default=1)
+    parser.add_argument("--encoder", default="masqclip",
+                        choices=["masqclip", "siglip"],
+                        help="masqclip is OpenSplat3D's default and sees each "
+                             "crop together with the instance mask inside it; "
+                             "siglip-so400m sees the crop alone.")
+    parser.add_argument("--pred-threshold", type=float, default=0.85,
+                        help="Instances scoring within this fraction of the "
+                             "best answer the query too. Their pred_type=max.")
+    parser.add_argument("--batch", type=int, default=16)
     args = parser.parse_args()
 
     device = torch.device("cuda")
@@ -124,63 +120,80 @@ def main():
     cells_per_instance = torch.bincount(
         labels[labels >= 0], minlength=clustering.n_clusters).cpu().numpy()
 
-    vlm_name = args.vlm or (OS3D_MODEL if args.recipe == "opensplat3d"
-                            else DEFAULT_VLM)
-    if args.recipe == "opensplat3d":
-        from PIL import Image
-        # (area, view_idx, mask, visible_cells) per instance per view
-        obs = {}
-        for vi, view in enumerate(sample):
-            idm = smaps[vi]
-            rays = data.rays[sindex[view]].to(device).reshape(-1, 6)
-            hit = labels[torch.unique(surface_cells(model, rays, device))]
-            seen = torch.bincount(hit[hit >= 0],
-                                  minlength=clustering.n_clusters).cpu().numpy()
-            for k in np.unique(idm):
-                if k == NOISE_ID:
-                    continue
-                m = idm == k
-                area = int(m.sum())
-                if area < MIN_PIXELS:
-                    continue
-                obs.setdefault(int(k), []).append((area, vi, m, int(seen[k])))
+    encoder = LanguageEncoder(args.encoder, device)
+    h, w = data.img_wh[1], data.img_wh[0]
 
-        h, w = data.img_wh[1], data.img_wh[0]
-        rgb_cache = {}
-        crops = {}
-        for k, o in obs.items():
-            for area, vi, m, vis in rank_views(o, cells_per_instance[k]):
-                if vi not in rgb_cache:
-                    rgb_cache[vi] = (
-                        data.rgbs[sindex[sample[vi]]].reshape(h, w, -1)[..., :3]
-                        .clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
-                rgb = rgb_cache[vi]
-                ratio = (RATIO if (area / (h * w)) < SMALL_AREA or
-                         not DYNAMIC_RATIO else 0.1)
-                for (r0, r1, c0, c1) in multi_level_boxes(m, ratio=ratio):
-                    if r1 > r0 and c1 > c0:
-                        crops.setdefault(k, []).append(
-                            Image.fromarray(rgb[r0:r1, c0:c1]))
-        print(f"{len(crops)} instances, "
-              f"{sum(len(c) for c in crops.values())} crops "
-              f"({TOPK_NOTE})", flush=True)
-        embeddings, ids = embed_instances(crops, device, vlm_name)
-        text = encode_text(cats, device, vlm_name)
-    else:
-        best_views = collect_instance_views(model, data, clustering, device)
-        embeddings, ids, _ = encode_instances(best_views, data, vlm_name, device)
-        text = encode_text(cats, device, vlm_name)
-    if not len(ids):
+    # (area, view_idx, mask, visible_cells) per instance per view
+    obs = {}
+    for vi, view in enumerate(sample):
+        idm = smaps[vi]
+        rays = data.rays[sindex[view]].to(device).reshape(-1, 6)
+        hit = labels[torch.unique(surface_cells(model, rays, device))]
+        seen = torch.bincount(hit[hit >= 0],
+                              minlength=clustering.n_clusters).cpu().numpy()
+        for k in np.unique(idm):
+            if k == NOISE_ID:
+                continue
+            m = idm == k
+            area = int(m.sum())
+            if area < MIN_PIXELS:
+                continue
+            obs.setdefault(int(k), []).append((area, vi, m, int(seen[k])))
+
+    rgb_cache = {}
+    crops, crop_masks = {}, {}
+    for k, o in obs.items():
+        for area, vi, m, vis in rank_views(o, cells_per_instance[k]):
+            if vi not in rgb_cache:
+                rgb_cache[vi] = torch.from_numpy((
+                    data.rgbs[sindex[sample[vi]]].reshape(h, w, -1)[..., :3]
+                    .clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
+                ).permute(2, 0, 1).contiguous()
+            rgb = rgb_cache[vi]
+            mt = torch.from_numpy(m)
+            ratio = (RATIO if (area / (h * w)) < SMALL_AREA or
+                     not DYNAMIC_RATIO else 0.1)
+            for (r0, r1, c0, c1) in multi_level_boxes(m, ratio=ratio):
+                if r1 <= r0 or c1 <= c0:
+                    continue
+                crop, cm = square_pad_resize(
+                    rgb[:, r0:r1, c0:c1], mt[r0:r1, c0:c1], encoder.img_size)
+                crops.setdefault(k, []).append(crop)
+                crop_masks.setdefault(k, []).append(cm)
+    print(f"{len(crops)} instances, {sum(len(c) for c in crops.values())} "
+          f"crops (top-5 views x 3 levels, {args.encoder})", flush=True)
+
+    ids, embeddings = [], []
+    for n, k in enumerate(sorted(crops)):
+        feats = []
+        for s in range(0, len(crops[k]), args.batch):
+            feats.append(encoder.encode_crops(crops[k][s:s + args.batch],
+                                              crop_masks[k][s:s + args.batch]))
+        pooled = torch.cat(feats).mean(dim=0)
+        embeddings.append(torch.nn.functional.normalize(pooled, dim=-1))
+        ids.append(k)
+        if n % 25 == 0:
+            print(f"\r  embedded {n + 1}/{len(crops)}", end="", flush=True)
+    print()
+    if not ids:
         raise SystemExit("no instance embeddings")
-    scores = (text @ embeddings.to(device).T).cpu().numpy()
+    text = encoder.encode_text(cats)
+    scores = (text @ torch.stack(embeddings).to(device).T).cpu().numpy()
+    chosen_per_cat = select_instances(scores, args.pred_threshold)
 
     id_maps = {v: m for v, m in zip(
         views, render_argmax_labels(model, data, labels, clustering.n_clusters,
                                     views, index, device))}
 
     per_iou, per_biou, oracle = {}, {}, {}
+    # Their headline mIoU is the mean over every (frame, category) pair, not
+    # the mean of per-category means. With categories annotated in unequal
+    # numbers of frames the two differ, so both are reported.
+    all_ious = []
+    per_query = {}
     for ci, cat in enumerate(cats):
-        chosen = [ids[j] for j in np.argsort(-scores[ci])[: args.top_k]]
+        chosen = [ids[j] for j in chosen_per_cat[ci]]
+        per_query[cat] = len(chosen)
         ious, bious, orc = [], [], []
         for v in views:
             if cat not in truth[v]:
@@ -193,6 +206,7 @@ def main():
                 if k != NOISE_ID:
                     best = max(best, iou(gt, id_maps[v] == k))
             orc.append(best)
+        all_ious.extend(ious)
         if ious:
             per_iou[cat] = float(np.mean(ious))
             per_biou[cat] = float(np.mean(bious))
@@ -206,16 +220,24 @@ def main():
     mi = float(np.mean(list(per_iou.values())))
     mb = float(np.mean(list(per_biou.values())))
     mo = float(np.mean(list(oracle.values())))
+    flat = float(np.mean(all_ious))
     print(f"{'-'*24} {'-'*7} {'-'*7} {'-'*8}")
     print(f"{scene + ' Mean':<24}{100*mi:>8.2f}{100*mb:>8.2f}{100*mo:>9.2f}")
+    print(f"{scene + ' flat mIoU':<24}{100*flat:>8.2f}   "
+          f"(their aggregation, over {len(all_ious)} frame-category pairs)")
+    print(f"instances per query: mean "
+          f"{np.mean(list(per_query.values())):.2f}, "
+          f"max {max(per_query.values())}")
 
     out = (Path(args.checkpoint)
-           / f"lerf_ovs_{Path(args.model).stem}_{args.recipe}.json")
+           / f"lerf_ovs_{Path(args.model).stem}_{args.encoder}.json")
     out.write_text(json.dumps(
         {"scene": scene, "miou": mi, "mbiou": mb, "oracle_miou": mo,
          "per_class_iou": per_iou, "oracle": oracle,
          "n_frames": len(views), "n_categories": len(per_iou),
-         "recipe": args.recipe, "vlm": vlm_name}, indent=2))
+         "flat_miou": flat, "n_instances_per_query": per_query,
+         "encoder": args.encoder,
+         "pred_threshold": args.pred_threshold}, indent=2))
     print(f"wrote {out}")
 
 

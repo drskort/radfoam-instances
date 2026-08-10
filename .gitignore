@@ -3,6 +3,7 @@
 /.venv-sam*/
 /external/sam_backends/
 /radfoam-build-*.log
+/radfoam-train-*.log
 /build*/
 /dist/
 /data
@@ -14,3 +15,6 @@ __pycache__
 /*nsight
 *.mp4b
 *ipynb
+
+# MasQCLIP weights: 1.5 GB each, from the MasQCLIP release, not ours to ship.
+ckpts/
