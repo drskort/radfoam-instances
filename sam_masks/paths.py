@@ -17,6 +17,10 @@ DATASET_ROOT = Path("/shared/user/datasets")
 # part of the mip-NeRF 360 set, so it lives on the writable disk.
 LERF_ROOT = Path("/nodes/host/work/user/lerf_mask")
 
+# ScanNet++, the full official release: 1006 scenes, of which nvs_sem_val's 50
+# are the 3D instance segmentation benchmark. Read-only shared storage.
+SCANNETPP_ROOT = Path("/shared/scannetpp/data")
+
 # The /nodes path first, deliberately. /work is NODE-LOCAL: it exists on every
 # compute node as that node's own scratch, so preferring it means the output
 # location depends on which node the job landed on -- results scatter across
@@ -64,6 +68,15 @@ SCENE_LAYOUT = {
 }
 
 
+def is_scannetpp(scene):
+    """ScanNet++ scenes are hex ids, and there are 1006 of them.
+
+    Enumerating them into DOWNSAMPLE/SCENE_LAYOUT by hand would be absurd, so
+    membership is decided by the release layout being present on disk.
+    """
+    return (SCANNETPP_ROOT / scene / "dslr" / "resized_images").is_dir()
+
+
 def resolve_output_root(candidates=None):
     """Return the first candidate output root whose parent directory exists.
 
@@ -83,12 +96,33 @@ def scene_root(scene, root=None):
     """Dataset root for a scene; an explicit root always wins."""
     if root is not None:
         return Path(root)
+    if is_scannetpp(scene):
+        return SCANNETPP_ROOT
     layout = SCENE_LAYOUT.get(scene)
     return layout[0] if layout else DATASET_ROOT
 
 
+def scene_downsample(scene):
+    """Working resolution for a scene, recorded in the arm's metadata.
+
+    ScanNet++ is 1006 scenes keyed by hex id, so they cannot be enumerated in
+    DOWNSAMPLE by hand; the release ships one resolution and the masks are
+    resized to the training size on load.
+    """
+    if is_scannetpp(scene):
+        return 1
+    if scene not in DOWNSAMPLE:
+        raise KeyError(f"Unknown scene {scene!r}; known: {sorted(DOWNSAMPLE)}")
+    return DOWNSAMPLE[scene]
+
+
 def scene_image_dir(scene, root=None):
     """Return the image directory for a scene at its working resolution."""
+    if is_scannetpp(scene):
+        # One resolution on disk, 1752x1168. Masks are resized to the training
+        # size with NEAREST when loaded, so generating at native resolution
+        # costs SAM time but loses no boundary detail.
+        return scene_root(scene, root) / scene / "dslr" / "resized_images"
     if scene not in DOWNSAMPLE:
         raise KeyError(f"Unknown scene {scene!r}; known: {sorted(DOWNSAMPLE)}")
     layout = SCENE_LAYOUT.get(scene)
@@ -98,6 +132,8 @@ def scene_image_dir(scene, root=None):
 
 def scene_sparse_dir(scene, root=None):
     """Return the COLMAP sparse reconstruction directory for a scene."""
+    if is_scannetpp(scene):
+        return scene_root(scene, root) / scene / "dslr" / "colmap"
     return scene_root(scene, root) / scene / "sparse" / "0"
 
 

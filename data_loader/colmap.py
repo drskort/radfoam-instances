@@ -21,19 +21,44 @@ def get_cam_ray_dirs(camera):
 
 
 class COLMAPDataset:
+    """mip-NeRF 360 layout: <root>/images[_N] and <root>/sparse/0.
+
+    The three hooks below are what other captures vary. ScanNet++ keeps its
+    poses under dslr/colmap, its frames under dslr/resized_images, and ships a
+    canonical split file -- but the ray construction, pose handling and
+    distortion model are identical, so it subclasses rather than duplicates.
+    """
+
+    def colmap_path(self, datadir):
+        return os.path.join(datadir, "sparse/0/")
+
+    def images_path(self, datadir, downsample):
+        if downsample == 1:
+            return os.path.join(datadir, "images")
+        return os.path.join(datadir, f"images_{downsample}")
+
+    def split_names(self, datadir, names, split):
+        """Return the names for `split`, or None to fall back to the defaults."""
+        return None
+
+    def load_image(self, path):
+        """Open one frame at the working resolution.
+
+        mip-NeRF 360 ships a pre-downsampled pyramid on disk, so the base class
+        just opens what images_path picked. Captures that ship a single
+        resolution resize here instead.
+        """
+        return Image.open(path)
+
     def __init__(self, datadir, split, downsample):
         assert downsample in [1, 2, 4, 8]
 
         self.root_dir = datadir
-        self.colmap_dir = os.path.join(datadir, "sparse/0/")
+        self.colmap_dir = self.colmap_path(datadir)
         self.split = split
         self.downsample = downsample
 
-        if downsample == 1:
-            images_dir = os.path.join(datadir, "images")
-        else:
-            images_dir = os.path.join(datadir, f"images_{downsample}")
-
+        images_dir = self.images_path(datadir, downsample)
         if not os.path.exists(images_dir):
             raise ValueError(f"Images directory {images_dir} not found")
 
@@ -49,7 +74,10 @@ class COLMAPDataset:
         if split not in ("train", "test"):
             raise ValueError(f"Invalid split: {split}")
 
-        if os.path.isdir(os.path.join(datadir, "images_train")):
+        override = self.split_names(datadir, names, split)
+        if override is not None:
+            names = override
+        elif os.path.isdir(os.path.join(datadir, "images_train")):
             # LERF-Mask ships its own split: images_train/ is the training set
             # and the graded views are images/test_*.jpg. Falling back to the
             # every-8th rule here would train on the graded views and score the
@@ -76,7 +104,7 @@ class COLMAPDataset:
 
         names = list(str(name) for name in names)
 
-        im = Image.open(os.path.join(images_dir, names[0]))
+        im = self.load_image(os.path.join(images_dir, names[0]))
         self.img_wh = im.size
         im.close()
 
@@ -120,7 +148,7 @@ class COLMAPDataset:
             world_rays = torch.cat([world_ray_origins, world_ray_dirs], dim=-1)
             world_rays = world_rays.reshape(self.img_wh[1], self.img_wh[0], 6)
 
-            im = Image.open(os.path.join(images_dir, image.name))
+            im = self.load_image(os.path.join(images_dir, image.name))
             im = im.convert("RGB")
             rgbs = torch.tensor(np.array(im), dtype=torch.float32) / 255.0
             im.close()

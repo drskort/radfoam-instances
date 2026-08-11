@@ -19,9 +19,9 @@ from sam_masks.automask import AutomaskConfig
 from sam_masks.backends import get_backend
 from sam_masks.frames import build_sequence
 from sam_masks.paths import (
-    DOWNSAMPLE,
     arm_dir,
     resolve_output_root,
+    scene_downsample,
     scene_image_dir,
 )
 from sam_masks.store import FrameMasks, read_meta, save_frame, write_meta
@@ -102,7 +102,7 @@ def run(scene, model, output_root=None, config=None, limit=None, force=False,
             "scene": scene,
             "model": model,
             "mode": "image",
-            "downsample": DOWNSAMPLE[scene],
+            "downsample": scene_downsample(scene),
             "n_frames": len(names),
             "n_computed": len(todo),
             "n_skipped": skipped,

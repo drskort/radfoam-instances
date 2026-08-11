@@ -8,11 +8,13 @@ import radfoam
 
 from .colmap import COLMAPDataset
 from .blender import BlenderDataset
+from .scannetpp import ScanNetPPDataset
 
 
 dataset_dict = {
     "colmap": COLMAPDataset,
     "blender": BlenderDataset,
+    "scannetpp": ScanNetPPDataset,
 }
 
 
@@ -74,8 +76,9 @@ class DataHandler:
             mask_dir = resolve_mask_dir(self.args.scene)
             if mask_dir is not None:
                 names = [im.name for im in split_dataset.images]
+                levels = tuple(getattr(self.args, "instance_levels", (0, 1, 2)))
                 self.instance_labels = load_level_labels(
-                    mask_dir, names, self.img_wh
+                    mask_dir, names, self.img_wh, levels=levels
                 )
                 print(
                     f"instance masks: {mask_dir} "
