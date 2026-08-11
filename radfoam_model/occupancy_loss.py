@@ -40,7 +40,7 @@ class CellGeometry:
     drifted without changing it.
     """
 
-    def __init__(self, refresh_every=100):
+    def __init__(self, refresh_every=250):
         self.n_points = None
         self.n_directed = None
         self.age = 0
@@ -58,6 +58,14 @@ class CellGeometry:
         if unchanged:
             self.age += 1
             return
+        # Release the previous buffers BEFORE allocating the new ones. Each
+        # rebuild materialises several 15M-element tensors, and holding the old
+        # set alive while the new one is allocated doubles the peak and
+        # fragments the caching allocator. Measured: triangulation rebuild time
+        # grew 4.7s -> 9.9s in 170 steps with the naive version, and the growth
+        # rate tracked how often this ran.
+        self.edges = self.face_weight = self.extent = None
+        torch.cuda.empty_cache()
         with torch.no_grad():
             edges = undirected_edges(adjacency, offsets)
             separation = (points[edges[:, 0]] - points[edges[:, 1]]).norm(dim=-1)

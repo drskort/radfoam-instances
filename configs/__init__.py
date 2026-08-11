@@ -68,6 +68,16 @@ class PipelineParams(ParamGroup):
         # Continue from an existing checkpoint rather than initialising from
         # COLMAP points. Requires densification off; see train.py.
         self.resume_from = ""
+        # Global step to continue from. Learning rates, freeze_points and
+        # occupancy_from are all functions of the step, so a resumed run that
+        # restarted the counter at 0 would slam a converged model with the
+        # initial learning rate.
+        self.start_iteration = 0
+        # Print a timestamped line around every triangulation
+        # rebuild. The occupancy prior hangs only when sites are
+        # free to move, and rebuild() is the one call on that
+        # path the frozen probes never make.
+        self.debug_triangulation = False
         self.occupancy_bin_weight = 0.0
         self.occupancy_tv_weight = 0.0
         self.occupancy_penalty = "entropy"

@@ -2,6 +2,7 @@ import os
 import uuid
 import yaml
 import gc
+import time
 import numpy as np
 from PIL import Image
 import configargparse
@@ -187,7 +188,9 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
         iters_since_densification = 0
         next_densification_after = 1
 
-        with tqdm.trange(pipeline_args.iterations) as train:
+        with tqdm.trange(
+            pipeline_args.start_iteration, pipeline_args.iterations
+        ) as train:
             for i in train:
                 if viewer is not None:
                     model.update_viewer(viewer)
@@ -415,10 +418,23 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                 # checkpoint being measured. densify_from = 0 does not express
                 # this -- it makes the counter run every step -- so the guard
                 # is explicit.
-                if pipeline_args.resume_from:
+                # A resumed run must not densify -- prune_and_densify would
+                # rebuild the very checkpoint being continued. It MAY still
+                # retriangulate, and must, whenever the sites are free to
+                # move: holding a stale mesh under moving points is exactly
+                # the staleness CellGeometry was fixed for. Frozen sites
+                # (points_lr 0, the fine-tune probe) need neither.
+                frozen = optimizer_args.points_lr_init == 0
+                if pipeline_args.resume_from and frozen:
                     iters_since_update = 0
                 elif iters_since_update >= triangulation_update_period:
+                    if pipeline_args.debug_triangulation:
+                        print(f"[{i}] retriangulating...", flush=True)
+                        _t0 = time.time()
                     model.update_triangulation(incremental=True)
+                    if pipeline_args.debug_triangulation:
+                        print(f"[{i}] retriangulated in "
+                              f"{time.time() - _t0:.2f}s", flush=True)
                     iters_since_update = 0
 
                     if triangulation_update_period < 100:
