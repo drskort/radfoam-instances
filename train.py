@@ -17,6 +17,11 @@ from torch.utils.tensorboard import SummaryWriter
 from data_loader import DataHandler
 from configs import *
 from radfoam_model.instance_loss import multi_level_instance_loss
+from radfoam_model.occupancy_loss import (
+    CellGeometry,
+    occupancy_loss,
+    occupancy_report,
+)
 from radfoam_model.scene import RadFoamScene
 from radfoam_model.utils import psnr
 import radfoam
@@ -95,6 +100,22 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
         points_colors=train_data_handler.points3D_colors,
     )
 
+    # Fine-tune an existing scene instead of building one. Only useful past
+    # freeze_points, where the triangulation is already fixed: densification
+    # and point motion are both over, so a short continuation moves densities
+    # and attributes and nothing else. That is what isolates a density prior
+    # from geometry adapting around it.
+    if pipeline_args.resume_from:
+        model.load_pt(pipeline_args.resume_from)
+        print(f"resumed from {pipeline_args.resume_from}: "
+              f"{model.primal_points.shape[0]} points", flush=True)
+        if pipeline_args.densify_until > 0:
+            raise SystemExit(
+                "resume_from with densification still enabled would rebuild "
+                "the triangulation and destroy the checkpoint being probed; "
+                "pass --densify_from 0 --densify_until 0 --freeze_points 0."
+            )
+
     # Setting up optimizer
     model.declare_optimizer(
         args=optimizer_args,
@@ -116,7 +137,7 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
             for i in range(rays.shape[0]):
                 ray_batch = ray_batch_fetcher.next()[0]
                 rgb_batch = rgb_batch_fetcher.next()[0]
-                output, _, _, _, _, _ = model(ray_batch, start_points[i])
+                output, *_ = model(ray_batch, start_points[i])
 
                 # White background
                 opacity = output[..., -1:]
@@ -146,6 +167,8 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
             f.close()
 
         return average_psnr
+
+    cell_geometry = CellGeometry()
 
     def train_loop(viewer):
         print("Training")
@@ -198,7 +221,7 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                     .values
                 )
 
-                rgba_output, _feature, depth, _, _, _ = model(
+                rgba_output, _feature, _feature_squared, depth, _, _, _ = model(
                     ray_batch,
                     depth_quantiles=depth_quantiles,
                 )
@@ -226,6 +249,8 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                 # precomputed SAM label maps. Skipped when no masks are present
                 # or the model carries no feature channels.
                 instance_stats = None
+                variance_loss = None
+                feature_variance = None
                 if (
                     label_batch is not None
                     and model.feat_dim > 0
@@ -239,10 +264,46 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                             pipeline_args.instance_pos_weight,
                             pipeline_args.instance_neg_weight,
                         ),
+                        level_weights=pipeline_args.instance_level_weights,
                     )
                     loss = loss + (
                         pipeline_args.instance_weight * instance_stats["total"]
                     )
+
+                # Variance loss. Unsupervised -- it asks each ray to hit cells
+                # that agree with each other and needs no masks, so it is not
+                # gated on the instance loss.
+                #
+                # NOTE the subtraction below is deliberately NOT under
+                # no_grad: autograd carries the d(s^2)/dF = -2F path into
+                # grad_feature, and the kernel relies on that. See
+                # docs/variance_backward.md.
+                if (
+                    _feature_squared is not None
+                    and model.feat_dim > 0
+                    and pipeline_args.variance_weight > 0
+                ):
+                    feature_variance = _feature_squared - torch.square(_feature)
+                    variance_loss = feature_variance.pow(2).mean()
+                    loss = loss + (pipeline_args.variance_weight * variance_loss)
+
+                # Potts prior on occupancy. Geometry-only and unsupervised, so
+                # it is gated on neither masks nor features.
+                if (pipeline_args.occupancy_bin_weight > 0
+                        or pipeline_args.occupancy_tv_weight > 0) and (
+                        i >= pipeline_args.occupancy_from):
+                    points, _, adjacency, offsets = model.get_trace_data()
+                    cell_geometry.refresh(points, adjacency, offsets)
+                    binarisation, interface = occupancy_loss(
+                        model.get_primal_density(), cell_geometry,
+                        penalty=pipeline_args.occupancy_penalty,
+                        sample=(pipeline_args.occupancy_edge_sample or None),
+                    )
+                    loss = loss + (
+                        pipeline_args.occupancy_bin_weight * binarisation
+                        + pipeline_args.occupancy_tv_weight * interface
+                    )
+
 
                 model.optimizer.zero_grad(set_to_none=True)
 
@@ -261,6 +322,15 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                 train.set_postfix(color_loss=f"{color_loss.mean().item():.5f}")
 
                 if i % 100 == 99 and not pipeline_args.debug:
+                    if cell_geometry.n_points is not None:
+                        stats = occupancy_report(
+                            model.get_primal_density(), cell_geometry)
+                        for key, value in stats.items():
+                            writer.add_scalar(f"occupancy/{key}", value, i)
+                        writer.add_scalar("loss/occupancy_bin",
+                                          binarisation.item(), i)
+                        writer.add_scalar("loss/occupancy_tv",
+                                          interface.item(), i)
                     writer.add_scalar("train/rgb_loss", color_loss.mean(), i)
                     # Is the instance loss actually moving the features? A dead
                     # gradient here means the loss is not reaching att_feat, and
@@ -281,6 +351,43 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                         writer.add_scalar(
                             "instance/att_feat_std", model.att_feat.std(), i
                         )
+                    # One group with every term on the same axes, weighted as
+                    # it actually enters the total -- the raw values differ by
+                    # orders of magnitude and are not comparable.
+                    writer.add_scalar("loss/total", loss, i)
+                    writer.add_scalar("loss/rgb", color_loss.mean(), i)
+                    writer.add_scalar("loss/opacity", opacity_loss, i)
+                    if instance_stats is not None:
+                        writer.add_scalar(
+                            "loss/instance_weighted",
+                            pipeline_args.instance_weight
+                            * instance_stats["total"],
+                            i,
+                        )
+                        writer.add_scalar(
+                            "loss/instance_raw", instance_stats["total"], i
+                        )
+                    if variance_loss is not None:
+                        writer.add_scalar(
+                            "loss/variance_weighted",
+                            pipeline_args.variance_weight * variance_loss,
+                            i,
+                        )
+                        writer.add_scalar("loss/variance_raw", variance_loss, i)
+                        writer.add_scalar("variance/loss", variance_loss, i)
+                        with torch.no_grad():
+                            writer.add_scalar(
+                                "variance/s2_mean", feature_variance.mean(), i
+                            )
+                            writer.add_scalar(
+                                "variance/s2_max", feature_variance.max(), i
+                            )
+                            # Should never go meaningfully below zero; a
+                            # negative here means the two accumulators have
+                            # drifted apart in the kernel.
+                            writer.add_scalar(
+                                "variance/s2_min", feature_variance.min(), i
+                            )
                     num_points = model.primal_points.shape[0]
                     writer.add_scalar("test/num_points", num_points, i)
 
@@ -302,7 +409,15 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                         "lr/attr_lr", model.attr_dc_scheduler_args(i), i
                     )
 
-                if iters_since_update >= triangulation_update_period:
+                # A resumed run must not touch geometry: the point of the
+                # probe is that the triangulation is held fixed while densities
+                # move, and prune_and_densify would rebuild the very
+                # checkpoint being measured. densify_from = 0 does not express
+                # this -- it makes the counter run every step -- so the guard
+                # is explicit.
+                if pipeline_args.resume_from:
+                    iters_since_update = 0
+                elif iters_since_update >= triangulation_update_period:
                     model.update_triangulation(incremental=True)
                     iters_since_update = 0
 
@@ -314,7 +429,8 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                     iters_since_densification += 1
 
                 if (
-                    iters_since_densification == next_densification_after
+                    not pipeline_args.resume_from
+                    and iters_since_densification == next_densification_after
                     and model.primal_points.shape[0]
                     < 0.9 * model.num_final_points
                 ):

@@ -53,10 +53,28 @@ class PipelineParams(ParamGroup):
         # intermediate scenes can be rendered. 0 disables.
         self.checkpoint_every = 2_000
         self.instance_weight = 0.1
+        self.variance_weight = 0.5
         # Iteration at which instance_guided_geometry starts taking effect.
         # Before it, features are still noise and moving geometry with them
         # only destabilises the triangulation.
         self.instance_geometry_from = 2_000
+        # Per-level multipliers on the contrastive loss, one per entry of
+        # instance_levels. See multi_level_instance_loss for why they are not
+        # all 1.0 by default in every experiment.
+        self.instance_level_weights = [1.0, 1.0, 1.0]
+        # Potts prior on the occupancy field: commit every cell to solid or
+        # empty, and minimise the interface between them. Both zero disables it.
+        # See docs/specs/2026-08-11-occupancy-potts-prior-design.md.
+        # Continue from an existing checkpoint rather than initialising from
+        # COLMAP points. Requires densification off; see train.py.
+        self.resume_from = ""
+        self.occupancy_bin_weight = 0.0
+        self.occupancy_tv_weight = 0.0
+        self.occupancy_penalty = "entropy"
+        self.occupancy_from = 0
+        # Edges sampled per step for the interface term. 0 uses all ~15M, which
+        # fits but costs; a sample is an unbiased estimate of the same mean.
+        self.occupancy_edge_sample = 2_000_000
         self.instance_gamma = 1.0
         self.instance_pos_weight = 1.0
         self.instance_neg_weight = 1.0
@@ -102,4 +120,9 @@ class DatasetParams(ParamGroup):
         self.patch_based = False
         self.downsample = [4, 2, 1]
         self.downsample_iterations = [0, 150, 500]
+        # Which SAM granularity levels to load as supervision. Level 1 is the
+        # degenerate one (4.1 masks/frame covering 44% of pixels); dropping it
+        # is the ablation, down-weighting it via instance_level_weights is the
+        # gentler alternative.
+        self.instance_levels = [0, 1, 2]
         super().__init__(parser, "Setting Dataset parameters")
