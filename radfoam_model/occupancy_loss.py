@@ -25,22 +25,38 @@ from radfoam_model.instance_graph import undirected_edges
 
 
 class CellGeometry:
-    """Neighbour distances, cached. Static while the triangulation is.
+    """Neighbour distances, cached and invalidated when the mesh changes.
 
     Both terms need the Delaunay neighbour distances -- the interface weight is
     a face-area proxy built from them, and the opacity conversion needs a cell
-    extent. Rebuilding costs a pass over ~15M edges, so it is done only when the
-    point count changes, which under freeze_points it never does.
+    extent. Rebuilding costs a pass over ~15M edges, so it is cached.
+
+    Keying the cache on point count alone is WRONG and was: between the end of
+    densification and freeze_points the sites still move and the triangulation
+    is rebuilt periodically, so connectivity changes while the count does not.
+    The TV term then penalises differences between cells that are no longer
+    neighbours, silently -- the indices stay in range, so nothing crashes. The
+    edge count catches a rebuild, and the periodic refresh catches sites that
+    drifted without changing it.
     """
 
-    def __init__(self):
+    def __init__(self, refresh_every=100):
         self.n_points = None
+        self.n_directed = None
+        self.age = 0
+        self.refresh_every = refresh_every
         self.edges = None
         self.face_weight = None
         self.extent = None
 
     def refresh(self, points, adjacency, offsets):
-        if self.n_points == points.shape[0]:
+        unchanged = (
+            self.n_points == points.shape[0]
+            and self.n_directed == adjacency.shape[0]
+            and self.age < self.refresh_every
+        )
+        if unchanged:
+            self.age += 1
             return
         with torch.no_grad():
             edges = undirected_edges(adjacency, offsets)
@@ -61,6 +77,8 @@ class CellGeometry:
             self.extent = 0.5 * total / count.clamp(min=1)
             self.edges = edges
             self.n_points = points.shape[0]
+            self.n_directed = adjacency.shape[0]
+            self.age = 0
         return self
 
 
