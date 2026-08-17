@@ -135,8 +135,11 @@ geometry; inpainting is not addressed here.
 
 - ScanNet++ numbers are one scene. The clustering sweep that produced
   `min_cluster_size=512` is in `scripts/eval_scannetpp.py --clustering hdbscan`.
-- Multicut on the Delaunay graph was tried across τ ∈ [0.1, 0.8] and lost to
-  feature-space HDBSCAN on ScanNet++ (best 7.8 AP vs 18.3).
+- Multicut on the Delaunay graph and HDBSCAN over cell features land in the
+  same place on ScanNet++ once both are swept: 18.4 AP (τ=0.3, `min_size=1024`)
+  against 18.3 (`min_cluster_size=512`), with HDBSCAN ahead on AP50/AP25. τ and
+  `min_size` interact — the best `min_size` grows with τ — so a sweep over one
+  with the other fixed is misleading.
 - LERF-OVS results come from single runs and moved by several mIoU between
   repeats in the cases checked, so treat small differences there with care.
 
