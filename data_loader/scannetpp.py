@@ -23,6 +23,13 @@ from .colmap import COLMAPDataset
 ROOT = "/shared/scannetpp/data"
 SPLITS = "/shared/scannetpp/splits"
 
+# OpenSplat3D's configs/scannetpp.yaml caps a scene at 300 frames (with
+# resolution 2, the downsample used here). Matching it keeps the comparison
+# honest and bounds memory: the loader holds every ray and colour in host RAM,
+# so the 1463-frame scenes in the val split would need ~26 GB before the
+# rearrange in DataHandler copies them again.
+MAX_FRAMES = 300
+
 
 class ScanNetPPDataset(COLMAPDataset):
     def colmap_path(self, datadir):
@@ -69,6 +76,13 @@ class ScanNetPPDataset(COLMAPDataset):
             raise ValueError(
                 f"{path} lists no {split} frame present in the reconstruction"
             )
+        # Uniform stride, not the first N: a capture is a walk through the
+        # room, so a prefix would cover part of it densely and the rest not at
+        # all. Test frames are never dropped -- they are few and the split
+        # chose them deliberately.
+        if split == "train" and MAX_FRAMES and len(chosen) > MAX_FRAMES:
+            step = len(chosen) / MAX_FRAMES
+            chosen = [chosen[int(i * step)] for i in range(MAX_FRAMES)]
         return chosen
 
 
