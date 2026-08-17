@@ -30,6 +30,12 @@ class RadFoamScene(torch.nn.Module):
         else:
             self.cameras = None
         self.sh_degree = args.sh_degree
+        self.feat_dim = args.feat_dim
+        # Whether the instance loss also shapes density/geometry. Left off by
+        # default so noisy masks cannot degrade reconstruction.
+        self.instance_guided_geometry = getattr(
+            args, "instance_guided_geometry", False
+        )
         self.num_init_points = args.init_points
         self.num_final_points = args.final_points
         self.activation_scale = args.activation_scale
@@ -56,7 +62,21 @@ class RadFoamScene(torch.nn.Module):
             )
         )
 
-        self.pipeline = radfoam.create_pipeline(self.sh_degree, self.attr_dtype)
+        # Instance features, packed after density in the attribute block.
+        # Initialised small and random rather than zero: identical init makes
+        # every per-mask prototype coincide, and a prototype-repulsion loss then
+        # has no direction to push along.
+        self.att_feat = nn.Parameter(
+            0.01
+            * torch.randn(
+                self.num_init_points,
+                self.feat_dim,
+                device=device,
+                dtype=self.attr_dtype,
+            )
+        )
+
+        self.pipeline = radfoam.create_pipeline(self.sh_degree, self.feat_dim, self.attr_dtype)
 
     def random_initialize(self):
         primal_points = (
@@ -156,6 +176,7 @@ class RadFoamScene(torch.nn.Module):
         self.density = optimizable_tensors["density"]
         self.att_dc = optimizable_tensors["att_dc"]
         self.att_sh = optimizable_tensors["att_sh"]
+        self.att_feat = optimizable_tensors["att_feat"]
 
     def update_triangulation(self, rebuild=True, incremental=False):
         if not self.primal_points.isfinite().all():
@@ -207,8 +228,13 @@ class RadFoamScene(torch.nn.Module):
 
     def get_trace_data(self):
         points = self.primal_points
+        # Layout must match the kernel: [SH][density][features].
         attributes = torch.cat(
-            [self.get_primal_attributes(), self.get_primal_density()],
+            [
+                self.get_primal_attributes(),
+                self.get_primal_density(),
+                self.att_feat,
+            ],
             dim=-1,
         ).to(self.attr_dtype)
         point_adjacency = self.point_adjacency
@@ -258,6 +284,7 @@ class RadFoamScene(torch.nn.Module):
             start_point,
             depth_quantiles,
             return_contribution,
+            self.instance_guided_geometry,
         )
 
     def update_viewer(self, viewer):
@@ -293,6 +320,11 @@ class RadFoamScene(torch.nn.Module):
                 "params": self.att_sh,
                 "lr": args.attributes_lr_init,
                 "name": "att_sh",
+            },
+            {
+                "params": self.att_feat,
+                "lr": args.attributes_lr_init,
+                "name": "att_feat",
             },
         ]
 
@@ -365,6 +397,7 @@ class RadFoamScene(torch.nn.Module):
         self.primal_points = optimizable_tensors["primal_points"]
         self.att_dc = optimizable_tensors["att_dc"]
         self.att_sh = optimizable_tensors["att_sh"]
+        self.att_feat = optimizable_tensors["att_feat"]
         self.density = optimizable_tensors["density"]
 
     def cat_tensors_to_optimizer(self, new_params):
@@ -417,6 +450,7 @@ class RadFoamScene(torch.nn.Module):
         self.primal_points = optimizable_tensors["primal_points"]
         self.att_dc = optimizable_tensors["att_dc"]
         self.att_sh = optimizable_tensors["att_sh"]
+        self.att_feat = optimizable_tensors["att_feat"]
         self.density = optimizable_tensors["density"]
 
     def prune_and_densify(
@@ -477,6 +511,7 @@ class RadFoamScene(torch.nn.Module):
                 "primal_points": sampled_points,
                 "att_dc": self.att_dc[sampled_inds],
                 "att_sh": self.att_sh[sampled_inds],
+                "att_feat": self.att_feat[sampled_inds],
                 "density": self.density[sampled_inds],
             }
 
@@ -523,9 +558,10 @@ class RadFoamScene(torch.nn.Module):
             ray_batch = ray_batch[:, d[0] :: downsample, d[1] :: downsample, :]
             rgb_batch = rgb_batch[:, d[0] :: downsample, d[1] :: downsample, :]
 
-            rgba_output, _, contribution, _, errbox = self.forward(
-                ray_batch, start_points[i], return_contribution=True
-            )
+            rgba_output, _feature, _feature_squared, _depth, contribution, \
+                _num_intersections, errbox = self.forward(
+                    ray_batch, start_points[i], return_contribution=True
+                )
             opacity = rgba_output[..., -1:]
             if white_bkg:
                 rgb_output = rgba_output[..., :3] + (1 - opacity)
@@ -556,38 +592,26 @@ class RadFoamScene(torch.nn.Module):
         adjacency = self.point_adjacency.cpu().numpy()
         adjacency_offsets = self.point_adjacency_offsets.cpu().numpy()
 
-        C0 = 0.28209479177387814
-        r = np.array(
-            np.clip(255 * (0.5 + C0 * color_attributes[:, 0]), 0, 255),
-            dtype=np.uint8,
-        )
-        g = np.array(
-            np.clip(255 * (0.5 + C0 * color_attributes[:, 1]), 0, 255),
-            dtype=np.uint8,
-        )
-        b = np.array(
-            np.clip(255 * (0.5 + C0 * color_attributes[:, 2]), 0, 255),
-            dtype=np.uint8,
+        # Instance features, when the model carries them. Previously only
+        # att_dc + att_sh reached the PLY, so any downstream consumer of the
+        # .ply had no access to the learned instance embedding at all and had
+        # to go back to the multi-gigabyte checkpoint for it.
+        features = (
+            self.att_feat.detach().float().cpu().numpy()
+            if getattr(self, "att_feat", None) is not None
+            else None
         )
 
-        vertex_data = []
-        for i in tqdm.trange(points.shape[0]):
-            vertex_data.append(
-                (
-                    points[i, 0],
-                    points[i, 1],
-                    points[i, 2],
-                    r[i],
-                    g[i],
-                    b[i],
-                    density[i, 0],
-                    adjacency_offsets[i + 1],
-                    *[
-                        color_attributes[i, 3 + j]
-                        for j in range(color_attributes.shape[1] - 3)
-                    ],
-                )
-            )
+        n_points = points.shape[0]
+        n_sh = color_attributes.shape[1] - 3
+        n_feat = 0 if features is None else features.shape[1]
+
+        # adjacency_offsets is a prefix sum with n + 1 entries; the PLY stores
+        # the EXCLUSIVE END for each point, i.e. entries 1..n.
+        assert adjacency_offsets.shape[0] == n_points + 1, (
+            f"expected {n_points + 1} adjacency offsets, "
+            f"got {adjacency_offsets.shape[0]}"
+        )
 
         dtype = [
             ("x", np.float32),
@@ -600,10 +624,36 @@ class RadFoamScene(torch.nn.Module):
             ("adjacency_offset", np.uint32),
         ]
 
-        for i in range(self.att_sh.shape[1]):
+        for i in range(n_sh):
             dtype.append(("color_sh_{}".format(i), np.float32))
 
-        vertex_data = np.array(vertex_data, dtype=dtype)
+        for i in range(n_feat):
+            dtype.append(("feat_{}".format(i), np.float32))
+
+        # Filled column-wise into a preallocated structured array. The previous
+        # row-at-a-time build materialised one Python tuple per point, which at
+        # four million points and now ~64 columns each is both slow and a large
+        # transient allocation. Same bytes on disk, same column order.
+        vertex_data = np.empty(n_points, dtype=dtype)
+        vertex_data["x"] = points[:, 0]
+        vertex_data["y"] = points[:, 1]
+        vertex_data["z"] = points[:, 2]
+
+        C0 = 0.28209479177387814
+        for channel, name in enumerate(("red", "green", "blue")):
+            vertex_data[name] = np.clip(
+                255 * (0.5 + C0 * color_attributes[:, channel]), 0, 255
+            ).astype(np.uint8)
+
+        vertex_data["density"] = density[:, 0]
+        vertex_data["adjacency_offset"] = adjacency_offsets[1:]
+
+        for i in range(n_sh):
+            vertex_data["color_sh_{}".format(i)] = color_attributes[:, 3 + i]
+
+        for i in range(n_feat):
+            vertex_data["feat_{}".format(i)] = features[:, i]
+
         vertex_element = PlyElement.describe(vertex_data, "vertex")
 
         adjacency_data = np.array(adjacency, dtype=[("adjacency", np.uint32)])
@@ -627,6 +677,11 @@ class RadFoamScene(torch.nn.Module):
             "adjacency": adjacency.long(),
             "adjacency_offsets": adjacency_offsets.long(),
         }
+        # Instance features. Without this the learned embedding is silently
+        # discarded at save time, and load_pt leaves att_feat at its
+        # constructor size while everything else comes back densified.
+        if getattr(self, "att_feat", None) is not None:
+            scene_data["att_feat"] = self.att_feat.detach().float().cpu()
         torch.save(scene_data, pt_path)
 
     def load_pt(self, pt_path):
@@ -646,6 +701,28 @@ class RadFoamScene(torch.nn.Module):
         self.att_sh = nn.Parameter(
             scene_data["color_sh"].to(self.attr_dtype).to(self.device)
         )
+
+        num_points = self.primal_points.shape[0]
+        if "att_feat" in scene_data:
+            self.att_feat = nn.Parameter(
+                scene_data["att_feat"].to(self.attr_dtype).to(self.device)
+            )
+        elif self.feat_dim > 0:
+            # A checkpoint from before features existed, or one written by the
+            # buggy save. Re-initialise at the right size rather than crashing
+            # in get_trace_data's cat -- but say so, since any instance
+            # analysis on this checkpoint is meaningless.
+            print(
+                f"warning: {pt_path} has no att_feat; re-initialising "
+                f"{num_points}x{self.feat_dim} features at random. Instance "
+                "results from this checkpoint will be noise."
+            )
+            self.att_feat = nn.Parameter(
+                0.01 * torch.randn(
+                    num_points, self.feat_dim,
+                    device=self.device, dtype=self.attr_dtype,
+                )
+            )
 
         self.point_adjacency = scene_data["adjacency"].to(self.device).to(
             torch.uint32)

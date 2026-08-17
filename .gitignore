@@ -2,13 +2,12 @@
 /.venv/
 /.venv-sam*/
 /external/sam_backends/
-/radfoam-build-*.log
-/radfoam-train-*.log
 /build*/
 /dist/
 /data
 /radfoam/
 /*output*
+/work
 
 *.egg-info
 __pycache__
@@ -16,5 +15,23 @@ __pycache__
 *.mp4b
 *ipynb
 
+# Slurm logs -- every job in this repo writes one to the root.
+*.log
+
+# Scratch: throwaway probes, one-off diagnostics, deck-building scripts.
+/.scratch/
+
+# Decks and their sources are shared out of band, not versioned (tens of MB).
+docs/*.pptx
+
+# Planning notes from the assistant workflow, not part of the method.
+docs/
+
 # MasQCLIP weights: 1.5 GB each, from the MasQCLIP release, not ours to ship.
 ckpts/
+
+# foamviz scene exports and PLYs are build artefacts of a checkpoint.
+*.ply
+
+# Compiled extension: built by `pip install -e .`, not source.
+/src/radfoam/

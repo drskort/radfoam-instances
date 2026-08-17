@@ -502,7 +502,8 @@ def sam_edge_counts(model, data, edges, mask_dir, view_names, device,
         mask_of_cell = torch.full((n_points,), -1, dtype=torch.long, device=device)
         for column in range(cells.shape[1] if cells.ndim > 1 else 1):
             slot = cells[:, column] if cells.ndim > 1 else cells
-            mask_of_cell[slot] = pixel_mask
+            ok = slot >= 0          # rays that reached no surface
+            mask_of_cell[slot[ok]] = pixel_mask[ok]
 
         mu, mv = mask_of_cell[u], mask_of_cell[v]
         both = (mu >= 0) & (mv >= 0)

@@ -1,5 +1,10 @@
 #!/bin/bash
-#SBATCH -J occ-probe -p 3090-lo --gres=gpu:1 -c 8 --mem=48G -t 02:00:00 -o occ-probe-%j.log
+#SBATCH -J occ-probe -p a40-lo --gres=gpu:1 -c 8 --mem=64G -t 03:00:00 -o occ-probe-%j.log
+#
+# a40, not 3090. These scenes train at ~2M points and the render backward
+# alone needs most of a 24 GB card; the occupancy term's extra allocations
+# tipped five of six probe runs into OOM at ~640 steps on a 3090. The original
+# training ran on a40 for the same reason.
 #
 # Fine-tune a trained scene under the Potts occupancy prior.
 #
@@ -16,6 +21,10 @@ REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"; cd "$REPO"
 source /usr/share/modules/init/bash; module load cuda/12.1
 source .venv/bin/activate
 export PYTHONPATH="$REPO"
+# The probe allocates and frees per-step edge gathers next to a 2M-point
+# backward, which fragments the caching allocator; expandable segments let it
+# reshape those blocks instead of stranding them.
+export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 NVLIBS=$(find "$REPO/.venv/lib/python3.10/site-packages/nvidia" -name lib -type d 2>/dev/null | tr "\n" ":")
 export LD_LIBRARY_PATH="${NVLIBS}${LD_LIBRARY_PATH:-}"
 
@@ -38,6 +47,7 @@ python train.py -c "$SRC/config.yaml" \
     --checkpoint_every 1000 \
     --occupancy_bin_weight "$BIN" \
     --occupancy_tv_weight "$TV" \
+    --occupancy_edge_sample "${EDGE_SAMPLE:-1000000}" \
     ${EXTRA_ARGS:-}
 
 echo "=== evaluating PSNR (gate 1) ==="

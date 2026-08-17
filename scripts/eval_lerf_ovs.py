@@ -103,6 +103,13 @@ def main():
     parser.add_argument("--occupancy", action="store_true",
                         help="Add edge solidity as a third log-odds term. "
                              "multicut_sam only.")
+    parser.add_argument("--density-gate", action="store_true",
+                        help="Use occupancy as a GATE on multicut edges rather "
+                             "than as an additive log-odds term. Delaunay "
+                             "adjacency is not contact: an edge crossing "
+                             "vacuum should carry no vote however similar the "
+                             "two cells look. This is what stops GAEC "
+                             "percolating across the scene through air.")
     parser.add_argument("--sam-views", type=int, default=1000,
                         help="Cap on views used for SAM "
                              "co-occurrence; the default takes all.")
@@ -155,7 +162,10 @@ def main():
             result = fit_graph_clusters(
                 model.att_feat, model.point_adjacency,
                 model.point_adjacency_offsets, method=args.clustering,
-                min_size=args.min_size, metric="euclidean", **kwargs,
+                min_size=args.min_size, metric="euclidean",
+                density=(model.get_primal_density()
+                         if args.density_gate else None),
+                **kwargs,
             )
             labels = result.labels
         clustering = clustering_from_labels(model.att_feat, labels)
@@ -198,7 +208,8 @@ def main():
     for vi, view in enumerate(sample):
         idm = smaps[vi]
         rays = data.rays[sindex[view]].to(device).reshape(-1, 6)
-        hit = labels[torch.unique(surface_cells(model, rays, device))]
+        seen_cells = torch.unique(surface_cells(model, rays, device))
+        hit = labels[seen_cells[seen_cells >= 0]]
         seen = torch.bincount(hit[hit >= 0],
                               minlength=clustering.n_clusters).cpu().numpy()
         for k in np.unique(idm):
@@ -302,6 +313,8 @@ def main():
     suffix = {"cached": "", "multicut_logodds": "_logodds",
               "multicut_sam": "_sam" + ("_occ" if args.occupancy else "")}.get(
         args.clustering, f"_multicut_tau{args.tau}")
+    if args.density_gate:
+        suffix += "_gated"
     out = (Path(args.checkpoint)
            / f"lerf_ovs_{Path(args.model).stem}_{args.encoder}{suffix}.json")
     out.write_text(json.dumps(

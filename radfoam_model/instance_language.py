@@ -111,7 +111,16 @@ def surface_cells(model, rays, device, quantiles=(0.5, 0.5)):
     # anything past the second is uninitialised memory, which shows up as an
     # out-of-range index and a device-side assert. Spreading the pair is the
     # only way to see more than the front surface per ray.
-    return index[:, 0] if quantiles[0] == quantiles[1] else index
+    index = index[:, 0] if quantiles[0] == quantiles[1] else index
+    # A ray that never accumulates enough opacity to reach its quantile leaves
+    # the slot unwritten, so the index is garbage. Dense scenes hide this; a
+    # heavily emptied density field (82% unassigned cells after the occupancy
+    # prior) hits it on a large fraction of rays and asserts on the first
+    # gather. Marked as -1 rather than dropped, because callers that pair these
+    # with per-pixel data need the shape preserved.
+    return index.masked_fill(
+        (index < 0) | (index >= points.shape[0]), -1
+    )
 
 
 def rank_views(observations, total_cells):

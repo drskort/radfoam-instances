@@ -20,8 +20,12 @@ class TraceRays(torch.autograd.Function):
         start_point,
         depth_quantiles,
         return_contribution,
+        instance_guided_geometry,
     ):
         ctx.rays = rays
+        # Whether the instance-feature gradient also drives density and
+        # geometry. Off by default; see TraceSettings in pipeline.h.
+        ctx.instance_guided_geometry = instance_guided_geometry
         ctx.start_point = start_point
         ctx.depth_quantiles = depth_quantiles
         ctx.pipeline = pipeline
@@ -41,6 +45,10 @@ class TraceRays(torch.autograd.Function):
             return_contribution=return_contribution,
         )
         ctx.rgba = results["rgba"]
+        # Needed by the backward pass to reconstruct "everything behind this
+        # primitive", exactly as rgba is.
+        ctx.feature = results.get("feature", None)
+        ctx.feature_squared = results.get("feature_squared", None)
         ctx.depth_indices = results.get("depth_indices", None)
 
         errbox = ErrorBox()
@@ -48,6 +56,8 @@ class TraceRays(torch.autograd.Function):
 
         return (
             results["rgba"],
+            results.get("feature", None),
+            results.get("feature_squared", None),
             results.get("depth", None),
             results.get("contribution", None),
             results["num_intersections"],
@@ -58,6 +68,8 @@ class TraceRays(torch.autograd.Function):
     def backward(
         ctx,
         grad_rgba,
+        grad_feature,
+        grad_feature_squared,
         grad_depth,
         grad_contribution,
         grad_num_intersections,
@@ -90,6 +102,11 @@ class TraceRays(torch.autograd.Function):
             ctx.depth_indices,
             grad_depth,
             ctx.errbox.ray_error,
+            ray_feature=ctx.feature,
+            ray_feature_grad=grad_feature,
+            ray_feature_squared=ctx.feature_squared,
+            ray_feature_squared_grad=grad_feature_squared,
+            instance_guided_geometry=ctx.instance_guided_geometry,
         )
         points_grad = results["points_grad"]
         attr_grad = results["attr_grad"]
@@ -108,6 +125,7 @@ class TraceRays(torch.autograd.Function):
             ctx.point_adjacency,
             ctx.point_adjacency_offsets,
             ctx.depth_quantiles,
+            ctx.feature,
         )
         return (
             None,  # pipeline
@@ -119,4 +137,5 @@ class TraceRays(torch.autograd.Function):
             None,  # start_point
             None,  # depth_quantiles
             None,  # return_contribution
+            None,  # instance_guided_geometry
         )

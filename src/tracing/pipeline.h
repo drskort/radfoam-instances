@@ -10,12 +10,17 @@ namespace radfoam {
 struct TraceSettings {
     float weight_threshold;
     uint32_t max_intersections;
+    // When true, the instance-feature loss also drives density and geometry
+    // (the dL/dalpha term). Off by default: SAM masks are noisy, and letting
+    // them deform the field trades reconstruction quality for segmentation.
+    bool instance_guided_geometry;
 };
 
 inline TraceSettings default_trace_settings() {
     TraceSettings settings;
     settings.weight_threshold = 0.001f;
     settings.max_intersections = 1024;
+    settings.instance_guided_geometry = false;
     return settings;
 }
 
@@ -72,7 +77,9 @@ class Pipeline {
                                uint32_t num_depth_quantiles,
                                const float *depth_quantiles,
                                void *ray_rgba,
-                               float *quantile_dpeths,
+                               void *ray_feature,
+                               void *ray_feature_squared,
+                               float *quantile_depths,
                                uint32_t *quantile_point_indices,
                                uint32_t *num_intersections,
                                void *point_contribution) = 0;
@@ -94,6 +101,10 @@ class Pipeline {
                                 const void *ray_rgba_grad,
                                 const float *depth_grad,
                                 const void *ray_error,
+                                const void *ray_feature,
+                                const void *ray_feature_grad,
+                                const void *ray_feature_squared,
+                                const void *ray_feature_squared_grad,
                                 Ray *ray_grad,
                                 Vec3f *points_grad,
                                 void *attribute_grad,
@@ -127,9 +138,12 @@ class Pipeline {
 
     virtual uint32_t attribute_dim() const = 0;
 
+    // Width of the per-point instance-feature block, 0 if absent.
+    virtual uint32_t feature_dim() const = 0;
+
     virtual ScalarType attribute_type() const = 0;
 };
 
-std::shared_ptr<Pipeline> create_pipeline(int sh_degree, ScalarType attr_type);
+std::shared_ptr<Pipeline> create_pipeline(int sh_degree, int feat_dim, ScalarType attr_type);
 
 } // namespace radfoam

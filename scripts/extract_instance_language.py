@@ -32,7 +32,12 @@ from PIL import Image
 
 from configs import *  # noqa: F401,F403
 from data_loader import DataHandler
-from radfoam_model.instance_cluster import NOISE_ID, assign, fit_clusters
+from radfoam_model.instance_cluster import (
+    NOISE_ID,
+    assign,
+    fit_clusters,
+    load_cached_clustering,
+)
 from radfoam_model.scene import RadFoamScene
 
 # OpenSplat3D's LERF/ScanNet++ settings.
@@ -243,7 +248,20 @@ def main():
     if getattr(model, "feat_dim", 0) == 0:
         raise SystemExit("this checkpoint has no instance features")
 
-    clustering = fit_clusters(model.att_feat)
+    # Prefer the shared cache. Without it this re-fits a 60k-sample HDBSCAN,
+    # which disagrees with the full fit on both instance count and ids -- and
+    # then every embedding is attached to the wrong object.
+    clustering, _cached_labels = load_cached_clustering(
+        args.checkpoint, model.att_feat
+    )
+    if clustering is None:
+        print("no usable clustering cache; fitting a fresh sampled one")
+        clustering = fit_clusters(model.att_feat)
+    # NOTE: view selection below assigns composited features by nearest
+    # centroid. For a full-cloud clustering the exact readout is argmax over
+    # per-cell labels, but that costs ceil(n_clusters/feat_dim) render passes
+    # per view instead of one. Centroids are adequate here because this stage
+    # only has to find views where an instance is large enough to crop.
     print(f"{clustering.n_clusters} instances "
           f"({100 * clustering.noise_fraction:.1f}% noise)")
 

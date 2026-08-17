@@ -11,7 +11,18 @@
 
 namespace radfoam {
 
-template <typename attr_scalar, int sh_degree, int block_size>
+template <int dimension>
+__device__ Vecf<dimension> mult_elem_wise(const Vecf<dimension> &a,
+                                          const Vecf<dimension> &b) {
+    Vecf<dimension> out = Vecf<dimension>::Zero();
+#pragma unroll
+    for (uint32_t i = 0; i < dimension; ++i) {
+        out[i] = a[i] * b[i];
+    }
+    return out;
+}
+
+template <typename attr_scalar, int sh_degree, int feat_dim, int block_size>
 __global__ void forward(TraceSettings settings,
                         const Vec3f *__restrict__ points,
                         const attr_scalar *__restrict__ attributes,
@@ -24,6 +35,8 @@ __global__ void forward(TraceSettings settings,
                         uint32_t num_depth_quantiles,
                         const float *__restrict__ depth_quantiles,
                         attr_scalar *__restrict__ ray_rgba,
+                        attr_scalar *__restrict__ ray_feature,
+                        attr_scalar *__restrict__ ray_feature_squared,
                         float *__restrict__ quantile_depths,
                         uint32_t *__restrict__ quantile_point_indices,
                         uint32_t *__restrict__ num_intersections,
@@ -34,7 +47,11 @@ __global__ void forward(TraceSettings settings,
         return;
 
     constexpr int sh_dim = 3 * (1 + sh_degree) * (1 + sh_degree);
-    constexpr int attr_memory_size = 1 + sh_dim;
+    constexpr int attr_memory_size = 1 + sh_dim + feat_dim;
+    // Layout: [SH: 0 .. sh_dim-1][density: sh_dim][features: sh_dim+1 ...].
+    // Density is NOT at attr_memory_size - 1 any more -- that slot is now
+    // the last feature channel.
+    constexpr int density_offset = sh_dim;
 
     Ray ray = rays[thread_idx];
     ray.direction /= ray.direction.norm();
@@ -44,18 +61,26 @@ __global__ void forward(TraceSettings settings,
 
     auto sh_coeffs = sh_coefficients<sh_degree>(ray.direction);
 
-    auto load_attributes = [&](uint32_t v_idx, Vec3f &rgb, float &s) {
+    auto load_attributes = [&](uint32_t v_idx, Vec3f &rgb, Vecf<feat_dim> &features, float &s) {
         const attr_scalar *attr_ptr = attributes + v_idx * attr_memory_size;
-        s = (float)attr_ptr[attr_memory_size - 1];
+        s = (float)attr_ptr[density_offset];
         if (s > 1e-6f) {
             rgb = load_sh_as_rgb<attr_scalar, sh_degree>(sh_coeffs, attr_ptr);
+            features = Vecf<feat_dim>::Zero();
+
+            for (int i = 0; i < feat_dim; ++i) {
+                features[i] = attr_ptr[1 + sh_dim + i];
+            }
         } else {
             rgb = Vec3f::Zero();
+            features = Vecf<feat_dim>::Zero();
         }
     };
 
     float transmittance = 1.0f;
     Vec3f accumulated_rgb = Vec3f::Zero();
+    Vecf<feat_dim> accumulated_feature = Vecf<feat_dim>::Zero();
+    Vecf<feat_dim> accumulated_feature_squared = Vecf<feat_dim>::Zero();
 
     uint32_t current_quantile_idx = 0;
     float current_quantile;
@@ -69,9 +94,10 @@ __global__ void forward(TraceSettings settings,
                        const Vec3f &current_point,
                        const Vec3f &next_point) {
         Vec3f rgb_primal;
+        Vecf<feat_dim> features_primal;
         float s_primal;
 
-        load_attributes(point_idx, rgb_primal, s_primal);
+        load_attributes(point_idx, rgb_primal, features_primal, s_primal);
 
         float delta_t = fmaxf(t_1 - t_0, 0.0f);
         float alpha = 1 - expf(-s_primal * delta_t);
@@ -81,6 +107,8 @@ __global__ void forward(TraceSettings settings,
             atomicAdd(point_contribution + point_idx, (attr_scalar)weight);
         }
         accumulated_rgb += weight * rgb_primal;
+        accumulated_feature += weight * features_primal;
+        accumulated_feature_squared += weight * mult_elem_wise(features_primal, features_primal);
 
         float next_transmittance = transmittance * (1 - alpha);
         while (current_quantile_idx < num_depth_quantiles &&
@@ -125,11 +153,19 @@ __global__ void forward(TraceSettings settings,
     }
     ray_rgba[thread_idx * 4 + 3] = attr_scalar(1 - transmittance);
 
+    for (uint32_t i = 0; i < feat_dim; ++i) {
+        ray_feature[thread_idx * feat_dim + i] = attr_scalar(accumulated_feature[i]);
+    }
+
+    for (uint32_t i = 0; i < feat_dim; ++i) {
+        ray_feature_squared[thread_idx * feat_dim + i] = attr_scalar(accumulated_feature_squared[i]);
+    }
+
     if (num_intersections)
         num_intersections[thread_idx] = n;
 }
 
-template <typename attr_scalar, int sh_degree, int block_size>
+template <typename attr_scalar, int sh_degree, int feat_dim, int block_size>
 __global__ void backward(TraceSettings settings,
                          const Vec3f *__restrict__ points,
                          const attr_scalar *__restrict__ attributes,
@@ -146,6 +182,10 @@ __global__ void backward(TraceSettings settings,
                          const attr_scalar *__restrict__ ray_rgba_grad,
                          const float *__restrict__ depth_grad,
                          const attr_scalar *__restrict__ ray_error,
+                         const attr_scalar *__restrict__ ray_feature,
+                         const attr_scalar *__restrict__ ray_feature_grad,
+                         const attr_scalar *__restrict__ ray_feature_squared,
+                         const attr_scalar *__restrict__ ray_feature_squared_grad,
                          Ray *__restrict__ ray_grad,
                          Vec3f *__restrict__ points_grad,
                          attr_scalar *__restrict__ attribute_grad,
@@ -156,7 +196,11 @@ __global__ void backward(TraceSettings settings,
         return;
 
     constexpr int sh_dim = 3 * (1 + sh_degree) * (1 + sh_degree);
-    constexpr int attr_memory_size = 1 + sh_dim;
+    constexpr int attr_memory_size = 1 + sh_dim + feat_dim;
+    // Layout: [SH: 0 .. sh_dim-1][density: sh_dim][features: sh_dim+1 ...].
+    // Density is NOT at attr_memory_size - 1 any more -- that slot is now
+    // the last feature channel.
+    constexpr int density_offset = sh_dim;
 
     Ray ray = rays[thread_idx];
     ray.direction /= ray.direction.norm();
@@ -167,13 +211,18 @@ __global__ void backward(TraceSettings settings,
 
     auto sh_coeffs = sh_coefficients<sh_degree>(ray.direction);
 
-    auto load_attributes = [&](uint32_t v_idx, Vec3f &rgb, float &s) {
+    auto load_attributes = [&](uint32_t v_idx, Vec3f &rgb, Vecf<feat_dim> &features, float &s) {
         const attr_scalar *attr_ptr = attributes + v_idx * attr_memory_size;
-        s = (float)attr_ptr[attr_memory_size - 1];
+        s = (float)attr_ptr[density_offset];
         if (s > 1e-6f) {
             rgb = load_sh_as_rgb<attr_scalar, sh_degree>(sh_coeffs, attr_ptr);
+            features = Vecf<feat_dim>::Zero();
+            for (int i = 0; i < feat_dim; ++i) {
+                features[i] = attr_ptr[1 + sh_dim + i];
+            }
         } else {
             rgb = Vec3f::Zero();
+            features = Vecf<feat_dim>::Zero();
         }
     };
 
@@ -183,6 +232,37 @@ __global__ void backward(TraceSettings settings,
         rgba_grad[i] = (float)ray_rgba_grad[thread_idx * 4 + i];
         rgba[i] = (float)ray_rgba[thread_idx * 4 + i];
     }
+    // Zero rather than uninitialised: a photometric-only step passes null here,
+    // and a zero gradient makes the feature atomicAdd below a harmless no-op.
+    Vecf<feat_dim> feature_grad = Vecf<feat_dim>::Zero();
+    Vecf<feat_dim> feature = Vecf<feat_dim>::Zero();
+    Vecf<feat_dim> feature_squared_grad = Vecf<feat_dim>::Zero();
+    Vecf<feat_dim> feature_squared = Vecf<feat_dim>::Zero();
+    if (ray_feature_grad != nullptr && ray_feature != nullptr) {
+#pragma unroll
+        for (uint32_t i = 0; i < feat_dim; ++i) {
+            feature_grad[i] = (float)ray_feature_grad[thread_idx * feat_dim + i];
+            feature[i] = (float)ray_feature[thread_idx * feat_dim + i];
+        }
+    }
+    // Guarded separately: the variance term is optional, so these two are null
+    // whenever variance_weight is 0 even though the feature buffers are not.
+    if (ray_feature_squared_grad != nullptr && ray_feature_squared != nullptr) {
+#pragma unroll
+        for (uint32_t i = 0; i < feat_dim; ++i) {
+            feature_squared_grad[i] =
+                (float)ray_feature_squared_grad[thread_idx * feat_dim + i];
+            feature_squared[i] =
+                (float)ray_feature_squared[thread_idx * feat_dim + i];
+        }
+    }
+
+    // No -2F*g_V correction here, deliberately. s^2 = V - F^2 is formed in
+    // train.py with autograd watching, so the gradient PyTorch hands us in
+    // ray_feature_grad ALREADY contains that path. Folding it in again would
+    // double-count it. (OpenSplat3D does apply the correction, because their
+    // wrapper builds the variance under torch.no_grad() and autograd never
+    // sees the subtraction -- opposite convention, same maths.)
 
     float error;
     if (ray_error) {
@@ -201,13 +281,15 @@ __global__ void backward(TraceSettings settings,
             uint32_t point_idx =
                 quantile_point_indices[thread_idx * num_depth_quantiles + i];
             float s = (float)
-                attributes[point_idx * attr_memory_size + attr_memory_size - 1];
+                attributes[point_idx * attr_memory_size + density_offset];
             current_depth_grad += ray_depth_grad[i] / s;
         }
     }
 
     float transmittance = 1.0f;
     Vec3f accumulated_rgb = Vec3f::Zero();
+    Vecf<feat_dim> accumulated_feature = Vecf<feat_dim>::Zero();
+    Vecf<feat_dim> accumulated_feature_squared = Vecf<feat_dim>::Zero();
 
     uint32_t prev_point_idx = UINT32_MAX;
     Vec3f prev_point = Vec3f::Zero();
@@ -222,9 +304,10 @@ __global__ void backward(TraceSettings settings,
                        const Vec3f &current_point,
                        const Vec3f &next_point) {
         Vec3f rgb_primal;
+        Vecf<feat_dim> features_primal;
         float s_primal;
 
-        load_attributes(point_idx, rgb_primal, s_primal);
+        load_attributes(point_idx, rgb_primal, features_primal, s_primal);
 
         float delta_t = fmaxf(t_1 - t_0, 0.0f);
         float alpha = 1 - expf(-s_primal * delta_t);
@@ -236,19 +319,42 @@ __global__ void backward(TraceSettings settings,
         }
 
         accumulated_rgb += weight * rgb_primal;
+        accumulated_feature += weight * features_primal;
+        accumulated_feature_squared +=
+            weight * mult_elem_wise(features_primal, features_primal);
         if (point_error) {
             atomicAdd(point_error + point_idx, (attr_scalar)(weight * error));
         }
 
         Vec3f dL_drgb_primal = rgba_grad.template head<3>() * weight;
 
+        // dL/df_n = w_n * dL/dF  +  2 w_n f_n * dL/dV
+        Vecf<feat_dim> dL_dfeatures_primal =
+            weight * (feature_grad +
+                      2.0f * mult_elem_wise(features_primal, feature_squared_grad));
+
         Vec3f rgb_rest = rgba.template head<3>() - accumulated_rgb;
         rgb_rest /= (transmittance * (1 - alpha + 1e-6f));
+
+        Vecf<feat_dim> features_rest = feature - accumulated_feature;
+        features_rest /= (transmittance * (1 - alpha + 1e-6f));
+        
+        Vecf<feat_dim> features_squared_rest = feature_squared - accumulated_feature_squared;
+        features_squared_rest /= (transmittance * (1 - alpha + 1e-6f));
 
         float dL_dalpha =
             transmittance *
             (rgb_primal - rgb_rest).dot(rgba_grad.template head<3>());
         dL_dalpha += (1 - rgba[3]) * rgba_grad[3] / (1 - alpha + 1e-6f);
+        
+        if (settings.instance_guided_geometry) {
+            dL_dalpha += transmittance * (features_primal - features_rest).dot(feature_grad);
+            dL_dalpha +=
+                transmittance *
+                (mult_elem_wise(features_primal, features_primal) -
+                 features_squared_rest)
+                    .dot(feature_squared_grad);
+        }
 
         float dL_ds_primal = dL_dalpha * dalpha_ds_primal;
         float dL_ddelta_t = dL_dalpha * dalpha_ddelta_t;
@@ -324,8 +430,14 @@ __global__ void backward(TraceSettings settings,
             dL_drgb_primal,
             attribute_grad + point_idx * attr_memory_size);
         atomicAdd(attribute_grad + point_idx * attr_memory_size +
-                      (attr_memory_size - 1),
+                      density_offset,
                   (attr_scalar)dL_ds_primal);
+
+        for (uint32_t i = 0; i < feat_dim; ++i) {
+            atomicAdd(attribute_grad + point_idx * attr_memory_size +
+                          1 + sh_dim + i,
+                      (attr_scalar)dL_dfeatures_primal[i]);
+        }
 
         return transmittance > settings.weight_threshold;
     };
@@ -342,7 +454,7 @@ __global__ void backward(TraceSettings settings,
                          functor);
 }
 
-template <typename attr_scalar, int sh_degree, int block_size>
+template <typename attr_scalar, int sh_degree, int feat_dim, int block_size>
 __global__ void
 visualization(TraceSettings settings,
               const Vec3f *__restrict__ points,
@@ -364,7 +476,11 @@ visualization(TraceSettings settings,
         return;
 
     constexpr int sh_dim = 3 * (1 + sh_degree) * (1 + sh_degree);
-    constexpr int attr_memory_size = 1 + sh_dim;
+    constexpr int attr_memory_size = 1 + sh_dim + feat_dim;
+    // Layout: [SH: 0 .. sh_dim-1][density: sh_dim][features: sh_dim+1 ...].
+    // Density is NOT at attr_memory_size - 1 any more -- that slot is now
+    // the last feature channel.
+    constexpr int density_offset = sh_dim;
 
     Ray ray = cast_ray(camera, pix_i, pix_j);
     if (ray.direction.norm() < 0.1f) {
@@ -376,7 +492,7 @@ visualization(TraceSettings settings,
 
     auto load_attributes = [&](uint32_t v_idx, Vec3f &rgb, float &s) {
         const attr_scalar *attr_ptr = attributes + v_idx * attr_memory_size;
-        s = (float)attr_ptr[attr_memory_size - 1];
+        s = (float)attr_ptr[density_offset];
         if (s > 1e-6f) {
             rgb = load_sh_as_rgb<attr_scalar, sh_degree>(sh_coeffs, attr_ptr);
         } else {
@@ -469,7 +585,7 @@ visualization(TraceSettings settings,
     surf2Dwrite(out, output_rgba, 4 * pix_i, camera.height - 1 - pix_j);
 }
 
-template <typename attr_scalar, int sh_degree, int block_size>
+template <typename attr_scalar, int sh_degree, int feat_dim, int block_size>
 __global__ void benchmark(TraceSettings settings,
                           const Vec3f *__restrict__ points,
                           const attr_scalar *__restrict__ attributes,
@@ -488,7 +604,11 @@ __global__ void benchmark(TraceSettings settings,
         return;
 
     constexpr int sh_dim = 3 * (1 + sh_degree) * (1 + sh_degree);
-    constexpr int attr_memory_size = 1 + sh_dim;
+    constexpr int attr_memory_size = 1 + sh_dim + feat_dim;
+    // Layout: [SH: 0 .. sh_dim-1][density: sh_dim][features: sh_dim+1 ...].
+    // Density is NOT at attr_memory_size - 1 any more -- that slot is now
+    // the last feature channel.
+    constexpr int density_offset = sh_dim;
 
     Ray ray = cast_ray(camera, pix_i, pix_j);
     if (ray.direction.norm() < 0.1f) {
@@ -500,7 +620,7 @@ __global__ void benchmark(TraceSettings settings,
 
     auto load_attributes = [&](uint32_t v_idx, Vec3f &rgb, float &s) {
         const attr_scalar *attr_ptr = attributes + v_idx * attr_memory_size;
-        s = (float)attr_ptr[attr_memory_size - 1];
+        s = (float)attr_ptr[density_offset];
         if (s > 1e-6f) {
             rgb = load_sh_as_rgb<attr_scalar, sh_degree>(sh_coeffs, attr_ptr);
         } else {
@@ -585,7 +705,7 @@ void prefetch_adjacent_diff(const Vec3f *points,
                           adjacent_diff);
 }
 
-template <typename attr_scalar, int sh_degree>
+template <typename attr_scalar, int sh_degree, int feat_dim>
 class CUDATracingPipeline : public Pipeline {
   public:
     CUDATracingPipeline() = default;
@@ -605,7 +725,9 @@ class CUDATracingPipeline : public Pipeline {
                        uint32_t num_depth_quantiles,
                        const float *depth_quantiles,
                        void *ray_rgba,
-                       float *quantile_dpeths,
+                       void *ray_feature,
+                       void *ray_feature_squared,
+                       float *quantile_depths,
                        uint32_t *quantile_point_indices,
                        uint32_t *num_intersections,
                        void *point_contribution) override {
@@ -621,7 +743,7 @@ class CUDATracingPipeline : public Pipeline {
 
         constexpr uint32_t block_size = 128;
         launch_kernel_1d<block_size>(
-            forward<attr_scalar, sh_degree, block_size>,
+            forward<attr_scalar, sh_degree, feat_dim, block_size>,
             num_rays,
             nullptr,
             settings,
@@ -636,7 +758,9 @@ class CUDATracingPipeline : public Pipeline {
             num_depth_quantiles,
             depth_quantiles,
             static_cast<attr_scalar *>(ray_rgba),
-            quantile_dpeths,
+            static_cast<attr_scalar *>(ray_feature),
+            static_cast<attr_scalar *>(ray_feature_squared),
+            quantile_depths,
             quantile_point_indices,
             num_intersections,
             static_cast<attr_scalar *>(point_contribution));
@@ -659,6 +783,10 @@ class CUDATracingPipeline : public Pipeline {
                         const void *ray_rgba_grad,
                         const float *depth_grad,
                         const void *ray_error,
+                        const void *ray_feature,
+                        const void *ray_feature_grad,
+                        const void *ray_feature_squared,
+                        const void *ray_feature_squared_grad,
                         Ray *ray_grad,
                         Vec3f *points_grad,
                         void *attribute_grad,
@@ -675,7 +803,7 @@ class CUDATracingPipeline : public Pipeline {
 
         constexpr uint32_t block_size = 128;
         launch_kernel_1d<block_size>(
-            backward<attr_scalar, sh_degree, block_size>,
+            backward<attr_scalar, sh_degree, feat_dim, block_size>,
             num_rays,
             nullptr,
             settings,
@@ -694,6 +822,12 @@ class CUDATracingPipeline : public Pipeline {
             static_cast<const attr_scalar *>(ray_rgba_grad),
             depth_grad,
             static_cast<const attr_scalar *>(ray_error),
+            // The forward-rendered feature map and the incoming dL/dfeature.
+            // Both may be null on a photometric-only step; the kernel guards.
+            static_cast<const attr_scalar *>(ray_feature),
+            static_cast<const attr_scalar *>(ray_feature_grad),
+            static_cast<const attr_scalar *>(ray_feature_squared),
+            static_cast<const attr_scalar *>(ray_feature_squared_grad),
             ray_grad,
             points_grad,
             static_cast<attr_scalar *>(attribute_grad),
@@ -719,7 +853,7 @@ class CUDATracingPipeline : public Pipeline {
         constexpr uint32_t block_size = 128;
 
         launch_kernel_1d<block_size>(
-            visualization<attr_scalar, sh_degree, block_size>,
+            visualization<attr_scalar, sh_degree, feat_dim, block_size>,
             num_rays,
             stream,
             settings,
@@ -750,7 +884,7 @@ class CUDATracingPipeline : public Pipeline {
 
         constexpr uint32_t block_size = 512;
         launch_kernel_1d<block_size>(
-            benchmark<attr_scalar, sh_degree, block_size>,
+            benchmark<attr_scalar, sh_degree, feat_dim, block_size>,
             num_rays,
             nullptr,
             settings,
@@ -765,40 +899,62 @@ class CUDATracingPipeline : public Pipeline {
     }
 
     uint32_t attribute_dim() const override {
-        return 1 + 3 * (1 + sh_degree) * (1 + sh_degree);
+        return 1 + 3 * (1 + sh_degree) * (1 + sh_degree) + feat_dim;
     }
+
+    uint32_t feature_dim() const override { return feat_dim; }
 
     ScalarType attribute_type() const override {
         return scalar_code<attr_scalar>();
     }
 };
 
-std::shared_ptr<Pipeline> create_pipeline(int sh_degree, ScalarType attr_type) {
+// feat_dim has to be a compile-time constant: the kernels size their per-point
+// attribute block with it. Each supported value is therefore a separate
+// instantiation, and unsupported values are rejected rather than silently
+// rounded -- add to SUPPORTED_FEAT_DIMS if another is needed, remembering that
+// every entry multiplies the number of kernels compiled.
+namespace {
 
+template <typename attr_scalar, int feat_dim>
+std::shared_ptr<Pipeline> create_pipeline_for(int sh_degree) {
+    if (sh_degree == 0) {
+        return std::make_shared<CUDATracingPipeline<attr_scalar, 0, feat_dim>>();
+    } else if (sh_degree == 1) {
+        return std::make_shared<CUDATracingPipeline<attr_scalar, 1, feat_dim>>();
+    } else if (sh_degree == 2) {
+        return std::make_shared<CUDATracingPipeline<attr_scalar, 2, feat_dim>>();
+    } else if (sh_degree == 3) {
+        return std::make_shared<CUDATracingPipeline<attr_scalar, 3, feat_dim>>();
+    } else {
+        throw std::runtime_error("Unsupported SH degree");
+    }
+}
+
+template <typename attr_scalar>
+std::shared_ptr<Pipeline> create_pipeline_for_dtype(int sh_degree, int feat_dim) {
+    switch (feat_dim) {
+    case 0:
+        return create_pipeline_for<attr_scalar, 0>(sh_degree);
+    case 16:
+        return create_pipeline_for<attr_scalar, 16>(sh_degree);
+    case 32:
+        return create_pipeline_for<attr_scalar, 32>(sh_degree);
+    default:
+        throw std::runtime_error(
+            "Unsupported feature dimension " + std::to_string(feat_dim) +
+            "; supported: 0, 16, 32");
+    }
+}
+
+} // namespace
+
+std::shared_ptr<Pipeline>
+create_pipeline(int sh_degree, int feat_dim, ScalarType attr_type) {
     if (attr_type == ScalarType::Float32) {
-        if (sh_degree == 0) {
-            return std::make_shared<CUDATracingPipeline<float, 0>>();
-        } else if (sh_degree == 1) {
-            return std::make_shared<CUDATracingPipeline<float, 1>>();
-        } else if (sh_degree == 2) {
-            return std::make_shared<CUDATracingPipeline<float, 2>>();
-        } else if (sh_degree == 3) {
-            return std::make_shared<CUDATracingPipeline<float, 3>>();
-        } else {
-            throw std::runtime_error("Unsupported SH degree");
-        }
+        return create_pipeline_for_dtype<float>(sh_degree, feat_dim);
     } else if (attr_type == ScalarType::Float16) {
-        if (sh_degree == 0) {
-            return std::make_shared<CUDATracingPipeline<__half, 0>>();
-        } else if (sh_degree == 1) {
-            return std::make_shared<CUDATracingPipeline<__half, 1>>();
-        } else if (sh_degree == 2) {
-            return std::make_shared<CUDATracingPipeline<__half, 2>>();
-        } else if (sh_degree == 3) {
-            return std::make_shared<CUDATracingPipeline<__half, 3>>();
-        } else {
-            throw std::runtime_error("Unsupported SH degree");
-        }
+        return create_pipeline_for_dtype<__half>(sh_degree, feat_dim);
     } else {
         throw std::runtime_error("Unsupported attribute type");
     }

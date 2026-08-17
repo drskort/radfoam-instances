@@ -193,6 +193,21 @@ py::object trace_forward(Pipeline &self,
                      torch::dtype(scalar_to_type_meta(self.attribute_type()))
                          .device(rays.device()));
 
+    // Instance features, one vector per ray. feature_dim() is 0 unless the
+    // pipeline was built with a feature block, in which case this allocates
+    // nothing and the kernel skips the writes.
+    const uint32_t feat_dim = self.feature_dim();
+    auto output_feature_shape = output_shape;
+    output_feature_shape.push_back(feat_dim);
+    torch::Tensor output_feature =
+        torch::empty(output_feature_shape,
+                     torch::dtype(scalar_to_type_meta(self.attribute_type()))
+                         .device(rays.device()));
+    torch::Tensor output_feature_squared = 
+        torch::empty(output_feature_shape, 
+                     torch::dtype(scalar_to_type_meta(self.attribute_type()))
+                         .device(rays.device()));
+
     auto output_num_intersections_shape = output_shape;
     output_num_intersections_shape.push_back(1);
     torch::Tensor num_intersections =
@@ -241,6 +256,8 @@ py::object trace_forward(Pipeline &self,
             ? reinterpret_cast<const float *>(depth_quantiles.data_ptr())
             : nullptr,
         output_rgba.data_ptr(),
+        feat_dim ? output_feature.data_ptr() : nullptr,
+        feat_dim ? output_feature_squared.data_ptr() : nullptr,
         return_depth ? reinterpret_cast<float *>(output_depth.data_ptr())
                      : nullptr,
         return_depth
@@ -252,6 +269,10 @@ py::object trace_forward(Pipeline &self,
     py::dict output_dict;
 
     output_dict["rgba"] = output_rgba;
+    if (feat_dim) {
+        output_dict["feature"] = output_feature;
+        output_dict["feature_squared"] = output_feature_squared;
+    }
     if (return_depth) {
         output_dict["depth"] = output_depth;
         output_dict["depth_indices"] = output_depth_indices;
@@ -277,8 +298,13 @@ py::object trace_backward(Pipeline &self,
                           std::optional<torch::Tensor> depth_indices_in,
                           std::optional<torch::Tensor> depth_grad_in,
                           std::optional<torch::Tensor> ray_error_in,
+                          std::optional<torch::Tensor> ray_feature_in,
+                          std::optional<torch::Tensor> ray_feature_grad_in,
+                          std::optional<torch::Tensor> ray_feature_squared_in,
+                          std::optional<torch::Tensor> ray_feature_squared_grad_in,
                           py::object weight_threshold,
-                          py::object max_intersections) {
+                          py::object max_intersections,
+                          bool instance_guided_geometry) {
     torch::Tensor points = points_in.contiguous();
     torch::Tensor attributes = attributes_in.contiguous();
     torch::Tensor point_adjacency = point_adjacency_in.contiguous();
@@ -402,6 +428,24 @@ py::object trace_backward(Pipeline &self,
         }
     }
 
+    std::optional<torch::Tensor> ray_feature_c;
+    if (ray_feature_in.has_value()) {
+        ray_feature_c = ray_feature_in.value().contiguous();
+    }
+    std::optional<torch::Tensor> ray_feature_grad_c;
+    if (ray_feature_grad_in.has_value()) {
+        ray_feature_grad_c = ray_feature_grad_in.value().contiguous();
+    }
+
+    std::optional<torch::Tensor> ray_feature_squared_c;
+    if (ray_feature_squared_in.has_value()) {
+        ray_feature_squared_c = ray_feature_squared_in.value().contiguous();
+    }
+    std::optional<torch::Tensor> ray_feature_squared_grad_c;
+    if (ray_feature_squared_grad_in.has_value()) {
+        ray_feature_squared_grad_c = ray_feature_squared_grad_in.value().contiguous();
+    }
+
     torch::Tensor ray_error;
     torch::Tensor point_error;
     if (return_error) {
@@ -437,6 +481,7 @@ py::object trace_backward(Pipeline &self,
     if (!max_intersections.is_none()) {
         settings.max_intersections = max_intersections.cast<uint32_t>();
     }
+    settings.instance_guided_geometry = instance_guided_geometry;
 
     int64_t num_attr = attributes.size(0);
 
@@ -479,6 +524,11 @@ py::object trace_backward(Pipeline &self,
         return_depth ? reinterpret_cast<const float *>(depth_grad.data_ptr())
                      : nullptr,
         return_error ? ray_error.data_ptr() : nullptr,
+        // Both null on a photometric-only step; the kernel guards.
+        ray_feature_c.has_value() ? ray_feature_c->data_ptr() : nullptr,
+        ray_feature_grad_c.has_value() ? ray_feature_grad_c->data_ptr() : nullptr,
+        ray_feature_squared_c.has_value() ? ray_feature_squared_c->data_ptr() : nullptr,
+        ray_feature_squared_grad_c.has_value() ? ray_feature_squared_grad_c->data_ptr() : nullptr,
         reinterpret_cast<radfoam::Ray *>(ray_grad.data_ptr()),
         reinterpret_cast<radfoam::Vec3f *>(points_grad.data_ptr()),
         attr_grad.data_ptr(),
@@ -584,9 +634,9 @@ void trace_benchmark(Pipeline &self,
         reinterpret_cast<uint32_t *>(output_rgba_in.data_ptr()));
 }
 
-std::shared_ptr<Pipeline> create_pipeline(int sh_degree,
+std::shared_ptr<Pipeline> create_pipeline(int sh_degree, int feat_dim,
                                           py::object attr_dtype) {
-    return create_pipeline(sh_degree, dtype_to_scalar_type(attr_dtype));
+    return create_pipeline(sh_degree, feat_dim, dtype_to_scalar_type(attr_dtype));
 }
 
 void run_with_viewer(std::shared_ptr<Pipeline> pipeline,
@@ -651,8 +701,13 @@ void init_pipeline_bindings(py::module &module) {
              py::arg("depth_indices") = py::none(),
              py::arg("depth_grad_in") = py::none(),
              py::arg("ray_error") = py::none(),
+             py::arg("ray_feature") = py::none(),
+             py::arg("ray_feature_grad") = py::none(),
+             py::arg("ray_feature_squared") = py::none(),
+             py::arg("ray_feature_squared_grad") = py::none(),
              py::arg("weight_threshold") = py::none(),
-             py::arg("max_intersections") = py::none())
+             py::arg("max_intersections") = py::none(),
+             py::arg("instance_guided_geometry") = false)
         .def("trace_benchmark",
              trace_benchmark,
              py::arg("points"),
@@ -669,6 +724,9 @@ void init_pipeline_bindings(py::module &module) {
     module.def("create_pipeline",
                create_pipeline,
                py::arg("sh_degree"),
+               // 0 keeps the original no-feature behaviour; see
+               // create_pipeline_for_dtype for the supported widths.
+               py::arg("feat_dim") = 0,
                py::arg("attr_dtype") = "float32");
 
     py::class_<Viewer, std::shared_ptr<Viewer>>(module, "Viewer")

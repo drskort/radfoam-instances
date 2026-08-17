@@ -86,6 +86,22 @@ fi
 
 EXPERIMENT="${EXPERIMENT_NAME:-${SCENE}_${SLURM_JOB_ID:-local}}"
 
+# preflight: the compute node can serve a stale copy of the repo over NFS,
+# which cost three runs that each died 7 minutes in at densification. Assert
+# the node sees the current source before spending a GPU-hour on it.
+echo "=== preflight (source as the compute node sees it) ==="
+python - <<'PREFLIGHT'
+import inspect, sys
+from radfoam_model.scene import RadFoamScene
+from radfoam_model.render import TraceRays
+src = inspect.getsource(RadFoamScene.collect_error_map)
+n_out = inspect.getsource(TraceRays.forward).count("results.get") + 2
+if f"_num_intersections" not in src:
+    sys.exit("STALE scene.py: collect_error_map does not unpack the current "
+             "forward tuple. Aborting before wasting the allocation.")
+print(f"forward returns {n_out} values; collect_error_map unpacks them by name -- OK")
+PREFLIGHT
+
 echo "=== training -> output/$EXPERIMENT ==="
 python train.py -c "$CONFIG" \
     --data_path "$DATA_PATH" \

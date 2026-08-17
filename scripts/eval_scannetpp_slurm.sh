@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J snpp-inst -p 3090-lo --gres=gpu:1 -c 8 --mem=64G -t 02:00:00 -o snpp-inst-%j.log
+#SBATCH -J snpp-inst -p 3090-lo --gres=gpu:1 -c 8 --mem=48G -t 02:00:00 -o snpp-inst-%j.log
 set -euo pipefail
 CHECKPOINT="${1:?usage: eval_scannetpp_slurm.sh <output/experiment>}"
 REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"; cd "$REPO"

@@ -56,7 +56,7 @@ def test(args, pipeline_args, model_args, optimizer_args, dataset_args):
             for i in range(rays.shape[0]):
                 ray_batch = ray_batch_fetcher.next()[0]
                 rgb_batch = rgb_batch_fetcher.next()[0]
-                output, _, _, _, _ = model(ray_batch, start_points[i])
+                output, *_ = model(ray_batch, start_points[i])
 
                 # White background
                 opacity = output[..., -1:]

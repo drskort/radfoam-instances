@@ -195,10 +195,22 @@ def main():
                 pred = cv2.resize(pred.astype(np.uint8),
                                   (gt.shape[1], gt.shape[0]),
                                   interpolation=cv2.INTER_NEAREST).astype(bool)
+            # Ceiling: the best single instance in this view, whether or not
+            # language found it. Separates "the decomposition has no such
+            # object" from "language picked the wrong object".
+            oracle_iou, oracle_id = 0.0, -1
+            for k in np.unique(id_map):
+                if k == NOISE_ID:
+                    continue
+                score = iou(gt, id_map == k)
+                if score > oracle_iou:
+                    oracle_iou, oracle_id = score, int(k)
+
             rows.append({
                 "view": view_name, "prompt": prompt,
                 "instance": int(ids[best[0]]),
                 "iou": iou(gt, pred), "biou": boundary_iou(gt, pred),
+                "oracle_iou": oracle_iou, "oracle_instance": oracle_id,
             })
             if args.dump:
                 overlay = np.zeros((*gt.shape, 3), np.uint8)
@@ -212,15 +224,23 @@ def main():
     miou = float(np.mean([r["iou"] for r in rows]))
     mbiou = float(np.mean([r["biou"] for r in rows]))
 
-    print(f"\n{'view':>12} {'prompt':<28} {'inst':>5} {'IoU':>7} {'BIoU':>7}")
+    print(f"\n{'view':>12} {'prompt':<28} {'inst':>5} {'IoU':>7} {'BIoU':>7}"
+          f" {'best':>5} {'oracle':>7}")
     for r in rows:
         print(f"{r['view']:>12} {r['prompt']:<28} {r['instance']:>5} "
-              f"{r['iou']:>7.3f} {r['biou']:>7.3f}")
+              f"{r['iou']:>7.3f} {r['biou']:>7.3f} "
+              f"{r['oracle_instance']:>5} {r['oracle_iou']:>7.3f}")
+    oracle = float(np.mean([r["oracle_iou"] for r in rows]))
+    matched = sum(r["instance"] == r["oracle_instance"] for r in rows)
     print(f"\n{dataset_args.scene}  mIoU {100 * miou:.1f}  "
           f"mBIoU {100 * mbiou:.1f}  ({len(rows)} prompt-view pairs, "
           f"top_k={args.top_k})")
+    print(f"{dataset_args.scene}  ORACLE mIoU {100 * oracle:.1f}  "
+          f"(best single instance per prompt; language picked it "
+          f"{matched}/{len(rows)} times)")
 
-    out = Path(args.checkpoint) / f"lerf_mask_{Path(args.model).stem}.json"
+    out = (Path(args.checkpoint)
+       / f"lerf_mask_{Path(args.model).stem}_top{args.top_k}.json")
     out.write_text(json.dumps({
         "scene": dataset_args.scene, "model": args.model,
         "top_k": args.top_k, "n_clusters": clustering.n_clusters,
