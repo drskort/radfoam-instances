@@ -110,11 +110,18 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
         model.load_pt(pipeline_args.resume_from)
         print(f"resumed from {pipeline_args.resume_from}: "
               f"{model.primal_points.shape[0]} points", flush=True)
-        if pipeline_args.densify_until > 0:
+        # Two different things use resume_from. Continuing an interrupted run
+        # (start_iteration > 0) must let densification carry on exactly as it
+        # would have -- that is the whole point of picking the schedule back up
+        # where it stopped. Probing a finished checkpoint (start_iteration 0)
+        # must not densify, because prune_and_densify would rebuild the very
+        # thing being measured.
+        if pipeline_args.start_iteration == 0 and pipeline_args.densify_until > 0:
             raise SystemExit(
-                "resume_from with densification still enabled would rebuild "
-                "the triangulation and destroy the checkpoint being probed; "
-                "pass --densify_from 0 --densify_until 0 --freeze_points 0."
+                "resume_from at iteration 0 with densification still enabled "
+                "would rebuild the triangulation and destroy the checkpoint "
+                "being probed; pass --densify_until 0, or set "
+                "--start_iteration to continue an interrupted run."
             )
 
     # Setting up optimizer
@@ -444,8 +451,10 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                 if i + 1 >= pipeline_args.densify_from:
                     iters_since_densification += 1
 
+                probing = (pipeline_args.resume_from
+                           and pipeline_args.start_iteration == 0)
                 if (
-                    not pipeline_args.resume_from
+                    not probing
                     and iters_since_densification == next_densification_after
                     and model.primal_points.shape[0]
                     < 0.9 * model.num_final_points
