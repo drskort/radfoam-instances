@@ -17,7 +17,7 @@ tessellation instead of Gaussian splats.
 ## Results
 
 **ScanNet++ 3D instance segmentation** (class-agnostic, scored on mesh points,
-scene `7b6477cb95` at 16k iterations):
+mean over [8 scenes](docs/scannetpp_subset.md) at 20k iterations):
 
 | method | AP | AP50 | AP25 |
 |---|---|---|---|
@@ -25,7 +25,14 @@ scene `7b6477cb95` at 16k iterations):
 | Segment3D | 13.0 | 23.8 | 38.3 |
 | OpenSplat3D | 19.2 | 37.3 | 56.2 |
 | OpenSplat3D + DBSCAN denoising | **24.5** | 41.7 | 57.1 |
-| this repo, HDBSCAN `min_cluster_size=512` | 18.3 | **52.3** | **69.1** |
+| this repo, HDBSCAN `min_cluster_size=512` | 17.7 | **42.3** | **65.6** |
+
+The baselines are on all 50 scenes of the validation split, this repo on the
+first 8. Per-scene AP here ranges from 6.9 to 29.8, which puts the standard
+error of the mean at ±2.9 — the AP column separates nothing. AP50 and AP25 do:
+both are ahead of OpenSplat3D's denoised numbers. Objects are found and
+separated well and localised loosely, which is what cells with hard faces and no
+blending between them would predict.
 
 **LERF-Mask** (grounded protocol, mean over figurines / ramen / teatime):
 
@@ -133,13 +140,17 @@ geometry; inpainting is not addressed here.
 
 ## Notes
 
-- ScanNet++ numbers are one scene. The clustering sweep that produced
-  `min_cluster_size=512` is in `scripts/eval_scannetpp.py --clustering hdbscan`.
-- Multicut on the Delaunay graph and HDBSCAN over cell features land in the
-  same place on ScanNet++ once both are swept: 18.4 AP (τ=0.3, `min_size=1024`)
-  against 18.3 (`min_cluster_size=512`), with HDBSCAN ahead on AP50/AP25. τ and
-  `min_size` interact — the best `min_size` grows with τ — so a sweep over one
-  with the other fixed is misleading.
+- **Multicut loses to plain feature clustering.** Over the 8 scenes, multicut on
+  the Delaunay graph (τ=0.3) is 1.7 AP behind HDBSCAN at matched `min_size` and
+  wins 2 of 8 scenes. Adding SAM-derived edge votes moves it +0.5 AP on 5 of 8,
+  which is inside the scene-to-scene noise. The graph structure is load-bearing
+  for the connected-component split, not for the partition itself. Kept in
+  `instance_graph.py` as a negative result.
+- HDBSCAN is insensitive to `min_cluster_size`: 256, 512 and 1024 span 0.23 AP,
+  so the reported setting is not tuned. Reproduce with
+  `scripts/eval_scannetpp.py --clustering hdbscan`.
+- The connected-component and point-assignment gains quoted above are measured
+  on one scene; the 8-scene table applies both throughout.
 - LERF-OVS results come from single runs and moved by several mIoU between
   repeats in the cases checked, so treat small differences there with care.
 
