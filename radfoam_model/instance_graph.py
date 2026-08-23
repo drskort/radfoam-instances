@@ -644,6 +644,54 @@ def occupancy_log_odds(occupancy, posterior, bins=32, report=False):
     return calibrate_distance(np.exp(x), posterior, bins=bins, report=report)
 
 
+def multicut_tau_sam(features, edges, agree, disagree, tau,
+                     min_size=DEFAULT_MIN_SIZE, metric="euclidean",
+                     safe_fraction=0.5, sam_weight=1.0, report=False):
+    """tau - d as the base weight, SAM co-occurrence as a modifier on top.
+
+    multicut_sam replaces the feature term with a calibrated log-odds ratio and
+    measurably loses: on one ScanNet++ scene it scores 14.7 AP against 18.4 for
+    the plain tau surrogate, despite the SAM signal itself being well measured (1.13
+    votes/edge, agreement 0.997 within an object vs 0.802 across). The reason is
+    scale, not information: the calibrated distance LLR spans about two nats,
+    far less dynamic range than tau - d, so swapping it in weakens the term that
+    carries the 99% of edges with no SAM vote, and the sparse voted edges then
+    dominate the contraction.
+
+    So keep tau - d, and let co-occurrence only adjust the edges it actually
+    observed. An edge seen agreeing gets pulled together, one seen disagreeing
+    gets pushed apart, in units of the base weight's own scale (tau) rather than
+    in nats. Edges with no observation are left exactly as the surrogate had
+    them.
+
+    Outcome, measured on 8 scenes rather than the one the above was tuned on:
+    this is worth +0.5 AP over sam_weight=0 on 5 of 8 scenes, which is inside
+    the scene-to-scene spread, and the whole multicut family sits 1.7 AP behind
+    HDBSCAN over cell features at matched min_size. Retained as a negative
+    result; the Delaunay graph earns its place in split_connected, not here.
+    """
+    distance = edge_dissimilarity(features.detach().float(), edges,
+                                  metric).cpu().numpy()
+    weight = tau - distance
+
+    seen = (agree + disagree) > 0
+    votes = np.zeros_like(weight)
+    # signed agreement in [-1, 1], scaled so a fully-agreeing edge shifts the
+    # weight by sam_weight * tau -- comparable to the surrogate's own range
+    total = np.maximum(agree + disagree, 1)
+    votes[seen] = ((agree - disagree) / total)[seen]
+    weight = weight + sam_weight * tau * votes
+
+    if report:
+        print(f"  tau+sam: {100 * seen.mean():.1f}% of edges have a vote, "
+              f"{100 * (weight > 0).mean():.1f}% attractive "
+              f"({100 * ((tau - distance) > 0).mean():.1f}% without votes)",
+              flush=True)
+    safe = distance < safe_fraction * tau
+    return _gaec(edges.cpu().numpy(), weight, safe, features.shape[0],
+                 min_size, features.device)
+
+
 def multicut_logodds(features, edges, min_size=DEFAULT_MIN_SIZE,
                      metric="euclidean", safe_nats=6.0, extra=None,
                      report=False):

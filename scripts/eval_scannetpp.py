@@ -41,13 +41,21 @@ def main():
                              "costs nothing on a 2D readout that skips them "
                              "and is a guaranteed miss here.")
     parser.add_argument("--clustering", default="cached",
-                        choices=["cached", "hdbscan", "multicut"],
+                        choices=["cached", "hdbscan", "multicut", "multicut_sam",
+                                 "multicut_tau_sam"],
                         help="cached = instances/clustering.pt. hdbscan = "
                              "refit at --min-cluster-size. multicut = GAEC on "
                              "the Delaunay graph at --tau.")
     parser.add_argument("--min-cluster-size", type=int, default=32)
     parser.add_argument("--min-samples", type=int, default=16)
     parser.add_argument("--tau", type=float, default=0.20)
+    parser.add_argument("--occupancy", action="store_true",
+                        help="multicut_sam: add edge solidity as a third "
+                             "log-odds term.")
+    parser.add_argument("--sam-views", type=int, default=1000)
+    parser.add_argument("--sam-weight", type=float, default=1.0,
+                        help="multicut_tau_sam: how far a fully-agreeing edge "
+                             "shifts the base weight, in units of tau.")
     parser.add_argument("--split-connected", action="store_true",
                         help="Split instances into spatially connected "
                              "components using the Delaunay adjacency. The "
@@ -82,6 +90,42 @@ def main():
             min_samples=args.min_samples)
         print(f"hdbscan min_cluster_size={args.min_cluster_size}: "
               f"{clustering.n_clusters} clusters, "
+              f"{100*clustering.noise_fraction:.1f}% noise", flush=True)
+    elif args.clustering in ("multicut_sam", "multicut_tau_sam"):
+        # The one configuration whose edge weights use information the feature
+        # clustering cannot see: how often two cells land in the same SAM mask.
+        from data_loader import DataHandler
+        from radfoam_model.instance_graph import (
+            clustering_from_labels, multicut_sam, sam_edge_counts,
+            undirected_edges)
+        from radfoam_model.instance_masks import resolve_mask_dir
+
+        mask_dir = resolve_mask_dir(scene)
+        if mask_dir is None:
+            raise SystemExit(f"no SAM masks for {scene}")
+        data = DataHandler(dataset_args, rays_per_batch=0, device=device)
+        data.reload(split="train", downsample=min(dataset_args.downsample))
+        edges = undirected_edges(model.point_adjacency,
+                                 model.point_adjacency_offsets)
+        step = max(1, len(data.image_names) // args.sam_views)
+        agree, disagree = sam_edge_counts(
+            model, data, edges, mask_dir, data.image_names[::step],
+            device, report=True)
+        if args.clustering == "multicut_tau_sam":
+            from radfoam_model.instance_graph import multicut_tau_sam
+            labels, _, _ = multicut_tau_sam(
+                model.att_feat, edges, agree, disagree, tau=args.tau,
+                min_size=args.min_cluster_size, sam_weight=args.sam_weight,
+                report=True)
+        else:
+            labels, _, _ = multicut_sam(
+                model.att_feat, edges, agree, disagree,
+                min_size=args.min_cluster_size, metric="euclidean", report=True,
+                occupancy=(model.get_primal_density().detach().float()
+                           .reshape(-1)[edges].min(dim=1).values.cpu().numpy()
+                           if args.occupancy else None))
+        clustering = clustering_from_labels(model.att_feat, labels)
+        print(f"multicut_sam: {clustering.n_clusters} clusters, "
               f"{100*clustering.noise_fraction:.1f}% noise", flush=True)
     elif args.clustering == "multicut":
         from radfoam_model.instance_graph import (
@@ -157,9 +201,17 @@ def main():
     print("\nOpenSplat3D, 50-scene mean: 19.2 / 37.3 / 56.2 "
           "(24.5 / 41.7 / 57.1 with graph smoothing)")
 
+    # min_cluster_size belongs in the name for BOTH clusterings: it is the
+    # granularity knob for each, and omitting it for multicut silently
+    # overwrote every cell of a tau x min_size sweep but one.
     tag = (f"{args.clustering}"
            + (f"_m{args.min_cluster_size}" if args.clustering == "hdbscan"
-              else f"_tau{args.tau}" if args.clustering == "multicut" else "")
+              else f"_tau{args.tau}_m{args.min_cluster_size}"
+              if args.clustering == "multicut"
+              else f"_m{args.min_cluster_size}" + ("_occ" if args.occupancy else "")
+              if args.clustering == "multicut_sam"
+              else f"_tau{args.tau}_m{args.min_cluster_size}_w{args.sam_weight}"
+              if args.clustering == "multicut_tau_sam" else "")
            + ("_fill" if args.fill_noise else "")
            + ("_split" if args.split_connected else ""))
     out = (Path(args.checkpoint)
