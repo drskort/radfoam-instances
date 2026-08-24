@@ -29,7 +29,7 @@ rather than on all ~4M cells. An interior cell of c is inside that box by
 definition, so the restriction is exact, and it keeps the component labelling
 to tens of thousands of nodes.
 
-    sbatch -p 3090-lo --mem=48G scripts/render_removal_slurm.sh \\
+    sbatch scripts/render_removal_slurm.sh \\
         output/teatime_var05_geo
 """
 

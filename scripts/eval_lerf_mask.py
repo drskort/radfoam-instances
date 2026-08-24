@@ -17,8 +17,7 @@ two bands. It is the metric that punishes a mask which is roughly in the right
 place but ragged at the edges, which is exactly where a soft blend of
 overlapping primitives is expected to lose to a hard partition of space.
 
-    srun -p 3090-lo --gres=gpu:1 --time=01:00:00 \
-        .venv/bin/python scripts/eval_lerf_mask.py \
+    python scripts/eval_lerf_mask.py \
             --checkpoint output/figurines_inst_geo --model model.pt
 """
 

@@ -24,8 +24,8 @@ mean over 8 scenes at 20k iterations):
 | SAM3D | 3.9 | 9.3 | 22.1 |
 | Segment3D | 13.0 | 23.8 | 38.3 |
 | OpenSplat3D | 19.2 | 37.3 | 56.2 |
-| OpenSplat3D + DBSCAN denoising | **24.5** | 41.7 | 57.1 |
-| this repo, HDBSCAN `min_cluster_size=512` | 17.7 | **42.3** | **65.6** |
+| OpenSplat3D + DBSCAN denoising | 24.5 | 41.7 | 57.1 |
+| this repo, HDBSCAN `min_cluster_size=512` | 17.7 | 42.3 | 65.6 |
 
 The baselines are on all 50 scenes of the validation split, this repo on the
 first 8, so no row here is like-for-like. Per-scene AP spans 6.9 to 29.8, giving
@@ -61,7 +61,10 @@ retrain and are the ones backed by artifacts. The 0.45 mIoU difference between
 the two is within the seed-to-seed variation measured on this benchmark.
 
 **LERF-OVS** (4 scenes, flat mIoU): 66.1 with SigLIP-so400m, 63.3 with MasQCLIP,
-against 59.7 for OpenSplat3D. Single runs — see [Notes](#notes).
+against 59.7 for OpenSplat3D. This benchmark's annotated frames are ordinary
+*training* views rather than a held-out split — that is the published protocol,
+so the comparison is like-for-like, but the number is not a generalisation
+measurement. Single runs — see [Notes](#notes).
 
 > LERF-OVS is **not** backed by a committed artifact — the checkpoint behind it
 > was lost and it has not been regenerated. It is a single run of a metric that
@@ -75,7 +78,7 @@ Follow the upstream [Radiant Foam](https://github.com/theialab/radfoam) build
 for the CUDA extension, then:
 
 ```bash
-git clone --recursive <this repo>        # six submodules under external/
+git clone --recursive https://github.com/<you>/radfoam-instances   # six submodules
 pip install torch==2.3.0 torchvision==0.18.0 --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
 pip install -e .
@@ -212,7 +215,8 @@ python scripts/summarize_results.py
 The first 8 scenes of the official `nvs_sem_val.txt` split, in file order —
 a prefix rather than a sample, so the choice involves no selection. Frames are
 capped at 300 with a uniform stride, matching `num_frames: 300` in OpenSplat3D's
-`MAX_FRAMES` in `data_loader/scannetpp.py`. DSLR captures only. Per-scene AP is
+`num_frames: 300` in OpenSplat3D's `configs/scannetpp.yaml`, implemented
+here as `MAX_FRAMES` in `data_loader/scannetpp.py`. DSLR captures only. Per-scene AP is
 for the reported configuration.
 
 | scene | frames used | GT scored | AP | AP50 | AP25 |
@@ -238,7 +242,6 @@ Regenerate the scene list with
 | path | |
 |---|---|
 | `radfoam_model/instance_loss.py` | multi-level contrastive loss over SAM masks |
-| `radfoam_model/variance_loss.py` | variance of composited features; CUDA backward in `src/tracing/pipeline.cu` |
 | `radfoam_model/instance_cluster.py` | HDBSCAN over all cells (cuML), cached with a feature fingerprint |
 | `radfoam_model/instance_graph.py` | multicut/GAEC, Felzenszwalb, threshold partitions on the Delaunay graph |
 | `radfoam_model/instance_language.py` | crop pipeline and SigLIP / MasQCLIP encoders |
@@ -265,15 +268,21 @@ so a second accumulator $V$ turns into a per-ray variance that penalises cells
 disagreeing along the same ray. $V$ is the raw second moment; the subtraction
 happens outside the kernel, which matters below.
 
-The loss is $\lVert \operatorname{Var}(F) \rVert_2^2$, and since
-$\operatorname{Var}(F)$ is a $D$-vector whose $d$-th entry is the scalar
-variance of channel $d$, the squared norm is just $\sum_d (s^2_d)^2$. There is
-no cross-channel term, so $\partial s^2_d / \partial f_{n,e} = 0$ for
-$e \neq d$ and the kernel treats every channel independently — no dot products
-across the feature axis.
+The paper writes the loss as $\lVert \operatorname{Var}(F) \rVert_2^2$ per
+ray. $\operatorname{Var}(F)$ is a $D$-vector whose $d$-th entry is the scalar
+variance of channel $d$, so there is no cross term and
+$\partial s^2_d / \partial f_{n,e} = 0$ for $e \neq d$. This implementation
+averages over channels rather than summing,
+
+$$\mathcal{L} = \frac{1}{RD} \sum_{r,d} \bigl(s^2_{r,d}\bigr)^2$$
+
+which differs from the paper by a constant $D$ that `variance_weight` absorbs.
+Channel-diagonality is what lets the *feature* gradient avoid any dot product
+across the feature axis; the density gradient under `instance_guided_geometry`
+necessarily sums over channels (`pipeline.cu:351`).
 
 Backward, two upstream gradients arrive per ray: $g_F$ from the contrastive
-term and $g_V = \partial \mathcal{L}/\partial V = 2 s^2 / R$, the second
+term and $g_V = \partial \mathcal{L}/\partial V = 2 s^2 / (RD)$, the second
 because $\partial s^2/\partial V = 1$. The existing backward is a linear
 operator — given gradient $g$ on $\sum_n w_n x_n$ it returns $w_n g$ — so it is
 applied twice, once with $x_n = f_n$ and once with $x_n = f_n^2$. With the
@@ -321,9 +330,15 @@ LERF, single seed:
 | change | effect |
 |---|---|
 | instance gradients also shaping density | +22.4 mIoU |
-| variance loss (weight 0.5) | +1.5 LERF-Mask, −0.8 LERF-OVS |
-| dropping SAM granularity level 1 | −7.6 |
+| variance loss (weight 0.5) | +1.5 mIoU |
+| dropping SAM granularity level 1 | −7.6 mIoU |
 | occupancy prior (binarisation + TV) | +0.2 mIoU, −2.1 mBIoU |
+
+> Like LERF-OVS, **these are not backed by committed artifacts** — single seed,
+> and the checkpoints behind them were lost. An earlier version of this table
+> also quoted a −0.8 LERF-OVS delta for the variance loss; that is an order of
+> magnitude inside the repeat-to-repeat spread of that benchmark and has been
+> removed rather than defended.
 
 The occupancy prior is kept as a negative result. It commits cells to solid or
 empty reliably (cells with α between 0.1 and 0.9 drop 4–11×), but most of the
@@ -361,7 +376,8 @@ span 0.23 AP), while multicut's grid spans 2.24, so the graph method is the more
 tuning-sensitive of the two as well.
 
 Two things cut the other way. Multicut is **16× cheaper** per scene as run
-here: 23 s against 368 s end-to-end on a 3090. Profiling puts essentially all of
+here: 23 s against 368 s end-to-end on a 3090. These timings were measured
+once and are not committed as artifacts, unlike the AP figures above. Profiling puts essentially all of
 HDBSCAN's cost in the cuML fit itself — data transfer and centroids are under
 0.1 s — of which ~84 s is one-time initialisation, so a process fitting
 repeatedly would see ~12× rather than 16×. And with `--fill-noise`
@@ -402,7 +418,7 @@ geometry; inpainting is not addressed here.
 ## Attribution
 
 My contribution is `radfoam_model/instance_*`, `occupancy_loss.py`,
-`variance_loss.py`, `scannetpp_eval.py`, `data_paths.py`, all of `sam_masks/`
+`scannetpp_eval.py`, `data_paths.py`, all of `sam_masks/`
 and `scripts/`, the ScanNet++ loader in `data_loader/`, and the feature and
 feature-squared accumulation with its analytic backward inside
 `src/tracing/pipeline.cu`. Everything else — the renderer, tracer, Delaunay

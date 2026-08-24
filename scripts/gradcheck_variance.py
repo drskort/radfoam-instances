@@ -4,13 +4,20 @@ Companion to gradcheck_features.py. That one injects a fixed dL/dF and checks a
 single composited output; this one exercises the second output V = sum w f^2 and
 the coupling between them, s^2 = V - F^2.
 
-The coupling is the part worth testing. dL/df_n = w_n(g_F - 2F g_V) + 2 w_n f_n g_V
-has two halves that are individually plausible and cancel to something wrong if
-either sign is off -- and OpenSplat3D's own implementation drops the second one,
-so "looks like the reference" is not evidence of correctness here.
+The coupling is the part worth testing. Writing g_F for the gradient arriving
+on F and g_V for the one on V, the kernel computes
 
-    srun -p a40-lo --gres=gpu:1 --time=00:20:00 \
-        .venv/bin/python scripts/gradcheck_variance.py
+    dL/df_n = w_n g_F + 2 w_n f_n g_V
+
+where g_F is the TOTAL derivative -- s^2 = V - F^2 is a live tensor op in
+train.py, so autograd has already folded the -2F g_V coupling into it and the
+kernel must not re-apply it. Under OpenSplat3D's convention the subtraction sits
+under no_grad, g_F is the partial, and the caller adds -2F g_V by hand; the two
+conventions are individually correct and produce opposite results if mixed.
+Mixing them is the bug this check exists to catch, and it is invisible at small
+feature scale -- see the note on the unit-scale regime below.
+
+    python scripts/gradcheck_variance.py     # needs a CUDA device
 """
 
 import torch

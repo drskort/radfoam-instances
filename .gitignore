@@ -12,7 +12,6 @@
 *.egg-info
 __pycache__
 /*nsight
-*.mp4b
 *ipynb
 
 # Slurm logs -- every job in this repo writes one to the root.

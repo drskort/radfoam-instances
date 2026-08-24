@@ -29,8 +29,8 @@ ROOT = SCANNETPP_ROOT
 BENCHMARK_CLASSES = SCANNETPP_META / "semantic_benchmark" / "top100_instance.txt"
 # ScanNet++'s own scorer, which OpenSplat3D uses:
 #   overlaps = np.append(np.arange(0.5, 0.95, 0.05), 0.25)
-# Note 0.95 is EXCLUDED -- that arange stops at 0.9, so AP averages ten
-# thresholds from 0.50 to 0.90, not 0.50 to 0.95. Rounded because arange on a
+# Note 0.95 is EXCLUDED -- that arange stops at 0.9, so AP averages nine
+# thresholds from 0.50 to 0.90, not ten from 0.50 to 0.95. Rounded because arange on a
 # float step yields 0.6000000000000001, and an instance overlapping at exactly
 # 0.6 would otherwise fail its own threshold.
 # (submodules/scannetpp/scannetpp/semantic/utils/instance_utils.py)

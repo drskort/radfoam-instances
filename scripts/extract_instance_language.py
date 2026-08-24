@@ -13,8 +13,7 @@ This avoids the two problems with lifting CLIP/SigLIP per primitive: the storage
 compositing a semantic embedding is not well defined -- the weighted mean of two
 CLIP vectors is not a CLIP vector.
 
-    srun -p a40-lo --gres=gpu:1 --time=01:00:00 \
-        .venv/bin/python scripts/extract_instance_language.py \
+    python scripts/extract_instance_language.py \
             --checkpoint output/garden_inst_nogeo
 
 Then query it:

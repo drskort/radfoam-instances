@@ -4,8 +4,7 @@ A hand-written backward pass that is subtly wrong still trains, and produces
 plausible-looking features. This is the only cheap way to know it is right.
 
 Run on a GPU node:
-    srun -p a40-lo --gres=gpu:1 --time=00:20:00 \
-        .venv/bin/python scripts/gradcheck_features.py
+    python scripts/gradcheck_features.py
 """
 
 import torch

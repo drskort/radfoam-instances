@@ -13,8 +13,7 @@ and show nothing about whether the embedding is actually consistent.
 Clustering the 3D field rather than the 2D renders is also what OpenSplat3D
 does -- instances live in the field, and the 2D views are projections of them.
 
-    srun -p a40-lo --gres=gpu:1 --time=01:00:00 \
-        .venv/bin/python scripts/render_instances.py \
+    python scripts/render_instances.py \
             --checkpoint output/garden_inst_nogeo
 """
 
