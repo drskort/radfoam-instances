@@ -57,6 +57,13 @@ the fill the same model scores 10.84 AP — see [Clustering study](#clustering-s
 **LERF-OVS** (4 scenes, flat mIoU): 66.1 with SigLIP-so400m, 63.3 with MasQCLIP,
 against 59.7 for OpenSplat3D. Single runs — see [Notes](#notes).
 
+> The two LERF tables are **not yet backed by committed artifacts**. The
+> checkpoints that produced them were deleted in a disk cleanup, so unlike the
+> ScanNet++ numbers they cannot currently be re-derived from anything in this
+> repo. They are being regenerated; until `results/lerf_mask/` and
+> `results/lerf_ovs/` exist, treat these two tables as reported-but-unverified
+> and the ScanNet++ table as the one with evidence behind it.
+
 ## Install
 
 Follow the upstream [Radiant Foam](https://github.com/theialab/radfoam) build
