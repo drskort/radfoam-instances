@@ -240,10 +240,58 @@ Regenerate the scene list with
 
 ## Implementation notes
 
-**Variance loss.** The renderer accumulates `V = Σ wₙ fₙ²` alongside
-`F = Σ wₙ fₙ`, so `s² = V − F²` penalises rays whose cells disagree. The
-backward pass is analytic, in `src/tracing/pipeline.cu`, and checked against
-`torch.autograd.gradcheck` by `scripts/gradcheck_variance.py`.
+### Variance loss and its backward pass
+
+The renderer already composites one quantity per ray. For a ray crossing cells
+$n = 1 \dots N$ with transmittance $T_n$ and opacity $\alpha_n$, write
+$w_n = T_n \alpha_n$. The instance features give
+
+$$F = \sum_n w_n f_n, \qquad V = \sum_n w_n f_n^2, \qquad s^2 = V - F^2$$
+
+so a second accumulator $V$ turns into a per-ray variance that penalises cells
+disagreeing along the same ray. $V$ is the raw second moment; the subtraction
+happens outside the kernel, which matters below.
+
+The loss is $\lVert \operatorname{Var}(F) \rVert_2^2$, and since
+$\operatorname{Var}(F)$ is a $D$-vector whose $d$-th entry is the scalar
+variance of channel $d$, the squared norm is just $\sum_d (s^2_d)^2$. There is
+no cross-channel term, so $\partial s^2_d / \partial f_{n,e} = 0$ for
+$e \neq d$ and the kernel treats every channel independently — no dot products
+across the feature axis.
+
+Backward, two upstream gradients arrive per ray: $g_F$ from the contrastive
+term and $g_V = \partial \mathcal{L}/\partial V = 2 s^2 / R$, the second
+because $\partial s^2/\partial V = 1$. The existing backward is a linear
+operator — given gradient $g$ on $\sum_n w_n x_n$ it returns $w_n g$ — so it is
+applied twice, once with $x_n = f_n$ and once with $x_n = f_n^2$. With the
+weights held fixed, $\partial F/\partial f_n = w_n$ and
+$\partial V/\partial f_n = 2 w_n f_n$, giving
+
+$$\frac{\partial \mathcal{L}}{\partial f_n} = w_n g_F + 2 w_n f_n g_V$$
+
+**The subtlety is who applies the coupling.** $F$ reaches the loss twice —
+directly, and through $s^2 = V - F^2$ with $\partial s^2/\partial F = -2F$.
+Exactly one of autograd and the kernel may account for it. Here
+`s² = V − F²` is a plain tensor op in the live graph, so the `grad_feature`
+handed to the kernel *already* contains the $-2F g_V$ path and the kernel
+applies no correction. OpenSplat3D wraps the same subtraction in
+`torch.no_grad()`, which is why they subtract it by hand instead. The two
+conventions are individually correct and cannot be mixed.
+
+An earlier version of this kernel did mix them, using
+$\hat g_F = g_F - 2F g_V$ under our convention. That double-counts the coupling
+and flips the gradient sign on exactly the cells that dominate a ray. It passed
+a finite-difference check at 0.1 feature scale — 1 failure in 32, dismissable as
+round-off — and failed 22 of 32 at unit scale. `scripts/gradcheck_variance.py`
+runs at unit scale for that reason.
+
+Composing the two terms when $g_F$ carries only the $s^2$ path gives
+$\partial s^2/\partial f_n = 2 w_n (f_n - F)$: each cell is pulled toward the
+ray's own mean feature, scaled by how much it actually contributed. A cell the
+ray barely touches barely moves; one that dominates the ray and disagrees gets
+pushed hard.
+
+The kernel is in `src/tracing/pipeline.cu`.
 
 **Point assignment.** Mesh points are assigned to the nearest cell *that renders*
 (density > 1e-3), not the nearest cell. About a third of cells never render, and
