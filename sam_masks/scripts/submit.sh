@@ -16,7 +16,7 @@
 #   for s in garden room; do for m in sam31 sam21; do for k in video image; do
 #     sbatch sam_masks/scripts/submit.sh $s $m $k; done; done; done
 #
-# Output goes to the shared view of host's disk, resolved by sam_masks.paths.
+# Output location is resolved by sam_masks.paths (RADFOAM_SAM_MASKS).
 # Do NOT hardcode /work here: that path exists separately on every compute node
 # as node-local scratch, so writing to it scatters results across machines.
 #

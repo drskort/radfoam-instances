@@ -30,7 +30,7 @@ export LD_LIBRARY_PATH="${NVLIBS}${LD_LIBRARY_PATH:-}"
 
 EXPERIMENT="${EXPERIMENT_NAME:-snpp8_${SCENE}}"
 CONFIG="${CONFIG_OVERRIDE:-configs/scannetpp.yaml}"
-DATA="${DATA_PATH:-/shared/scannetpp/data}"
+DATA="${DATA_PATH:-data/scannetpp}"
 OUT="output/$EXPERIMENT"
 
 RESUME=()

@@ -67,8 +67,9 @@ def is_scannetpp(scene):
 def resolve_output_root(candidates=None):
     """Return the first candidate output root whose parent directory exists.
 
-    The root itself is created if missing; its parent must already exist, which
-    is what distinguishes "we are on host" from "we are on a compute node".
+    The root itself is created if missing; its parent must already exist, so a
+    candidate naming a disk this machine does not have is skipped rather than
+    silently created.
     """
     candidates = list(candidates if candidates is not None else OUTPUT_ROOT_CANDIDATES)
     for candidate in candidates:
