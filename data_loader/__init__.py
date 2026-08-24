@@ -86,6 +86,24 @@ class DataHandler:
                     f"{100 * (self.instance_labels >= 0).float().mean():.1f}% "
                     "of pixels labelled)"
                 )
+            elif getattr(self.args, "instance_weight", 0.0) > 0:
+                # Training would otherwise run to completion with the instance
+                # loss silently skipped, producing a feature field of noise that
+                # only shows up as a bad number hours later. The usual cause is
+                # a --tag that does not match DEFAULT_ARM.
+                from radfoam_model.instance_masks import (
+                    DEFAULT_ARM,
+                    DEFAULT_MASK_ROOTS,
+                )
+
+                raise SystemExit(
+                    f"no SAM masks for scene '{self.args.scene}' "
+                    f"(arm '{DEFAULT_ARM}') under "
+                    f"{[str(r) for r in DEFAULT_MASK_ROOTS]}.\n"
+                    "Run `python -m sam_masks.run_image --scene "
+                    f"{self.args.scene} --model sam21_levels --tag t70` first, "
+                    "or pass --instance_weight 0 to train radiance only."
+                )
             else:
                 print(f"instance masks: none found for {self.args.scene}")
 

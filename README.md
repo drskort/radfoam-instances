@@ -63,6 +63,7 @@ Follow the upstream [Radiant Foam](https://github.com/theialab/radfoam) build
 for the CUDA extension, then:
 
 ```bash
+git clone --recursive <this repo>        # six submodules under external/
 pip install torch==2.3.0 torchvision==0.18.0 --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
 pip install -e .
@@ -120,9 +121,20 @@ below are what they run, and are what you want anywhere else.
 
 **1. Precompute SAM masks** (resumable; the mask store is keyed by scene and tag)
 
+SAM runs in its own virtual environment. It needs Python ≥3.12 and torch ≥2.7,
+while this repo is pinned to torch 2.3 / CUDA 12.1 by the
+`_GLIBCXX_USE_CXX11_ABI=0` constraint in `src/CMakeLists.txt`, so the two cannot
+share an interpreter. The setup script builds it and clones the SAM checkouts:
+
 ```bash
+bash sam_masks/scripts/setup_env.sh      # needs `uv` on PATH
 python -m sam_masks.run_image --scene teatime --model sam21_levels --tag t70
 ```
+
+The tag is not free-form: training looks for the arm `sam21_levels_image_t70`
+(`DEFAULT_ARM` in `radfoam_model/instance_masks.py`), so `--model sam21_levels
+--tag t70` must match. Training aborts with an explicit error if the masks are
+missing rather than quietly skipping the instance loss.
 
 **2. Train with instance features**
 
