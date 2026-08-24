@@ -20,8 +20,10 @@ from PIL import Image
 
 from .colmap import COLMAPDataset
 
-ROOT = "/shared/scannetpp/data"
-SPLITS = "/shared/scannetpp/splits"
+from radfoam_model.data_paths import SCANNETPP_ROOT, SCANNETPP_SPLITS
+
+ROOT = str(SCANNETPP_ROOT)
+SPLITS = str(SCANNETPP_SPLITS)
 
 # OpenSplat3D's configs/scannetpp.yaml caps a scene at 300 frames (with
 # resolution 2, the downsample used here). Matching it keeps the comparison

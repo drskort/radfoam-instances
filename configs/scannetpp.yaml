@@ -32,7 +32,7 @@ freeze_points: 18_000
 
 # Dataset Parameters
 dataset: "scannetpp"
-data_path: "/shared/scannetpp/data"
+data_path: "data/scannetpp"
 scene: "7b6477cb95"
 patch_based: false
 # The release ships a single 1752x1168 resolution; the loader resizes on load,

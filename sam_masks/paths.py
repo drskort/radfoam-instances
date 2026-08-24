@@ -1,36 +1,23 @@
 """Filesystem layout for the SAM mask precomputation runs.
 
-/work/user is a node-local ext4 disk on the login node host; the same
-disk is reachable from anywhere as /nodes/host/work/user. Callers
-should never hardcode either one, and must not assume /work means host's
-disk -- every compute node has its own /work.
+Roots come from radfoam_model.data_paths, which reads environment variables and
+falls back to <repo>/data/<name>; see the README's dataset section.
 
-/shared/user holds the datasets but is at its 500 GB quota, so it is
-strictly an input path.
+One caveat specific to mask OUTPUT, kept because it is easy to get wrong on a
+cluster: a node-local scratch path such as /work exists separately on every
+compute node, so writing there scatters results across whichever machines the
+jobs landed on. Point RADFOAM_SAM_MASKS at a path that resolves to the same
+physical disk from every node.
 """
 
 from pathlib import Path
 
-DATASET_ROOT = Path("/shared/user/datasets")
-
-# LERF-Mask (Gaussian Grouping's annotated LERF scenes), downloaded rather than
-# part of the mip-NeRF 360 set, so it lives on the writable disk.
-LERF_ROOT = Path("/nodes/host/work/user/lerf_mask")
-
-# ScanNet++, the full official release: 1006 scenes, of which nvs_sem_val's 50
-# are the 3D instance segmentation benchmark. Read-only shared storage.
-SCANNETPP_ROOT = Path("/shared/scannetpp/data")
-
-# The /nodes path first, deliberately. /work is NODE-LOCAL: it exists on every
-# compute node as that node's own scratch, so preferring it means the output
-# location depends on which node the job landed on -- results scatter across
-# several machines' local disks and only some are visible afterwards. The
-# /nodes/host view resolves to the same physical disk from the login node and
-# from every compute node, so it is the only unambiguous choice.
-OUTPUT_ROOT_CANDIDATES = [
-    Path("/nodes/host/work/user/sam_masks"),
-    Path("/work/user/sam_masks"),
-]
+from radfoam_model.data_paths import (
+    LERF_MASK_ROOT as LERF_ROOT,
+    MIPNERF360_ROOT as DATASET_ROOT,
+    SAM_MASK_ROOTS as OUTPUT_ROOT_CANDIDATES,
+    SCANNETPP_ROOT,
+)
 
 # Match radfoam's training resolutions so masks align with what the model will
 # consume: configs/mipnerf360_outdoor.yaml settles at downsample 4,

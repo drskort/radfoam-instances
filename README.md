@@ -48,21 +48,64 @@ against 59.7 for OpenSplat3D. Single runs — see [Notes](#notes).
 
 ## Install
 
-Follow the upstream [Radiant Foam](https://github.com/theialab/radfoam) build,
-then:
+Follow the upstream [Radiant Foam](https://github.com/theialab/radfoam) build
+for the CUDA extension, then:
 
 ```bash
+pip install torch==2.3.0 torchvision==0.18.0 --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements.txt
 pip install -e .
-pip install cuml-cu12 transformers open-clip-torch plyfile
 ```
 
-MasQCLIP weights (optional, for the `masqclip` encoder) go in
-`ckpts/MasQCLIP/base_novel.pth`; they are not redistributed here.
+Developed against CUDA 12.1, torch 2.3.0, cuML 24.10 on a single 24 GB GPU
+(RTX 3090 / A40). **The cuML pin matters**: 24.10 has no `build_algo` on
+HDBSCAN, so a newer release builds the kNN graph differently and can return a
+different partition than the numbers reported here.
+
+Optional, only for the `masqclip` language encoder:
+
+```bash
+pip install git+https://github.com/openai/CLIP.git   # OpenAI CLIP, not on PyPI
+```
+
+and put the MasQCLIP weights at `ckpts/MasQCLIP/base_novel.pth`. They come from
+the [MasQCLIP release](https://github.com/mlpc-ucsd/MasQCLIP) and are not
+redistributed here. The default `siglip` encoder needs neither — it pulls
+`google/siglip-so400m-patch14-384` through `transformers` on first use.
+
+## Datasets
+
+No dataset is redistributed here. Each root is resolved by
+`radfoam_model/data_paths.py` in this order: an environment variable, then
+`data/<name>`, then a fallback for the cluster this was developed on. The
+intended setup is symlinks into `data/` (gitignored):
+
+```bash
+mkdir -p data
+ln -s /path/to/lerf_mask   data/lerf_mask     # or export RADFOAM_LERF_MASK=...
+ln -s /path/to/lerf_ovs    data/lerf_ovs      #        RADFOAM_LERF_OVS
+ln -s /path/to/scannetpp   data/scannetpp     #        RADFOAM_SCANNETPP
+ln -s /path/to/sam_masks   data/sam_masks     #        RADFOAM_SAM_MASKS
+```
+
+| root | what it is | where to get it |
+|---|---|---|
+| `data/lerf_mask` | the 3 LERF scenes with Gaussian Grouping's mask annotations, COLMAP layout with `images_train/` | [Gaussian Grouping](https://github.com/lkeab/gaussian-grouping) |
+| `data/lerf_ovs` | LERF-OVS text queries and label polygons, under `lerf_ovs/label/` | [LangSplat](https://github.com/minghanqin/LangSplat) |
+| `data/scannetpp` | the official release's `data/` directory (DSLR captures, per-scene `dslr/colmap` and `dslr/resized_images`) | [ScanNet++](https://kaldir.vc.in.tum.de/scannetpp/) — registration required |
+| `data/sam_masks` | written by step 1 below, not downloaded | — |
+
+ScanNet++ evaluation additionally reads `metadata/` and `splits/` as siblings of
+`data/`; override with `RADFOAM_SCANNETPP_RELEASE` if your layout differs. For
+your own captures, `prepare_colmap_data.py` runs COLMAP over a directory of
+images into the layout the loaders expect.
 
 ## Reproducing the numbers
 
-Every stage has a Slurm wrapper alongside it in `scripts/*_slurm.sh`; the plain
-commands below are what those wrappers run.
+Every stage has a Slurm wrapper alongside it in `scripts/*_slurm.sh`. Those
+hardcode one particular cluster's partitions and module system and are kept
+only as a record of how the reported runs were launched — the plain commands
+below are what they run, and are what you want anywhere else.
 
 **1. Precompute SAM masks** (resumable; the mask store is keyed by scene and tag)
 
@@ -101,6 +144,15 @@ The LERF harnesses read a cached clustering; produce it once with
 `python scripts/foamviz.py cluster --checkpoint output/<run> --method full`.
 `scripts/eval_scannetpp.py` refits instead, so `--clustering` controls it directly.
 
+**4. Check the tables.** Every ScanNet++ number below is committed as the raw
+output of the command that produced it, under `results/scannetpp/<scene>/`
+(80 runs: 10 configurations x 8 scenes). Regenerate the tables from those files
+rather than trusting the markdown:
+
+```bash
+python scripts/summarize_results.py
+```
+
 ### ScanNet++ subset
 
 The first 8 scenes of the official `nvs_sem_val.txt` split, in file order —
@@ -135,7 +187,10 @@ configuration.
 | `radfoam_model/occupancy_loss.py` | opacity binarisation + total-variation prior |
 | `radfoam_model/scannetpp_eval.py` | 3D instance AP against the scanned mesh |
 | `sam_masks/` | SAM 2.1 / 3.1 mask precompute |
+| `radfoam_model/data_paths.py` | dataset root resolution (env var, then `data/`) |
 | `scripts/eval_*.py` | LERF-Mask, LERF-OVS, ScanNet++ harnesses |
+| `scripts/summarize_results.py` | rebuilds the ScanNet++ tables from `results/` |
+| `results/scannetpp/` | raw eval output backing every number reported here |
 
 ## Implementation notes
 

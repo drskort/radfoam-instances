@@ -23,10 +23,7 @@ from PIL import Image
 
 from radfoam_model.instance_loss import IGNORE_LABEL, MASK_STRIDE
 
-DEFAULT_MASK_ROOTS = [
-    Path("/nodes/host/work/user/sam_masks"),
-    Path("/work/user/sam_masks"),
-]
+from radfoam_model.data_paths import SAM_MASK_ROOTS as DEFAULT_MASK_ROOTS
 DEFAULT_ARM = "sam21_levels_image_t70"
 DEFAULT_LEVELS = (0, 1, 2)
 

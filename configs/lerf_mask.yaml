@@ -32,7 +32,7 @@ freeze_points: 18_000
 
 # Dataset Parameters
 dataset: "colmap"
-data_path: "/nodes/host/work/user/lerf_mask"
+data_path: "data/lerf_mask"
 scene: "figurines"
 patch_based: false
 # The images ship at ~986x728, which is already close to mip-NeRF 360's

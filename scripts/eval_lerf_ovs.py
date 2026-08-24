@@ -46,7 +46,9 @@ from radfoam_model.instance_language import (  # noqa: E402
 )
 from extract_instance_language import load_model  # noqa: E402
 
-LABEL_ROOT = Path("/nodes/host/work/user/lerf_ovs/lerf_ovs/label")
+from radfoam_model.data_paths import LERF_OVS_ROOT
+
+LABEL_ROOT = LERF_OVS_ROOT / "lerf_ovs" / "label"
 
 
 def load_polygons(scene, img_wh):

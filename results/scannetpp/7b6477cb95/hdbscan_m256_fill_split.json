@@ -1,0 +1,17 @@
+{
+  "AP": 0.14272046914418673,
+  "AP50": 0.38227356851291233,
+  "AP25": 0.638218964867447,
+  "n_pred": 99,
+  "n_gt": 48,
+  "void_dropped_at_50": 39,
+  "scene": "7b6477cb95",
+  "coverage": 95.16274792339614,
+  "n_clusters": 90,
+  "score": "uniform",
+  "clustering": "hdbscan",
+  "min_cluster_size": 256,
+  "tau": 0.2,
+  "fill_noise": true,
+  "split_connected": true
+}

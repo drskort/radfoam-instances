@@ -1,3 +1,4 @@
+# Upstream Radiant Foam build + runtime.
 cmake==3.29.2
 cmake-format==0.6.13
 cmake_build_extension==0.6.1
@@ -13,3 +14,23 @@ pyyaml==6.0.2
 scipy==1.15.1
 tensorboard==2.19.0
 tqdm==4.67.1
+
+# Instance segmentation additions.
+numpy==2.2.6
+scikit-learn==1.7.2
+
+# Clustering. The cuML version is load-bearing: 24.10 has no `build_algo` on
+# HDBSCAN, so a newer release builds the kNN graph differently and may return a
+# different partition than the reported numbers.
+cuml-cu12==24.10.0
+
+# Language queries. transformers covers the `siglip` encoder
+# (google/siglip-so400m-patch14-384, pulled at first use).
+transformers==4.57.6
+sentencepiece==0.2.2
+
+# Only for the `masqclip` encoder, via third_party/masqclip.py. This is OpenAI's
+# CLIP, which is not on PyPI:
+#   pip install git+https://github.com/openai/CLIP.git
+ftfy==6.3.1
+regex==2026.7.19

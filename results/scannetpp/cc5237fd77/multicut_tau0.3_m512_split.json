@@ -1,0 +1,17 @@
+{
+  "AP": 0.050534985161972745,
+  "AP50": 0.12116810258465238,
+  "AP25": 0.4262672811059908,
+  "n_pred": 78,
+  "n_gt": 31,
+  "void_dropped_at_50": 50,
+  "scene": "cc5237fd77",
+  "coverage": 65.84268303465478,
+  "n_clusters": 107,
+  "score": "uniform",
+  "clustering": "multicut",
+  "min_cluster_size": 512,
+  "tau": 0.3,
+  "fill_noise": false,
+  "split_connected": true
+}

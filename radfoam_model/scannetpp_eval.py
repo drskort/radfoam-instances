@@ -23,10 +23,10 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path("/shared/scannetpp/data")
-BENCHMARK_CLASSES = Path(
-    "/shared/scannetpp/metadata/semantic_benchmark/top100_instance.txt"
-)
+from radfoam_model.data_paths import SCANNETPP_META, SCANNETPP_ROOT
+
+ROOT = SCANNETPP_ROOT
+BENCHMARK_CLASSES = SCANNETPP_META / "semantic_benchmark" / "top100_instance.txt"
 # ScanNet++'s own scorer, which OpenSplat3D uses:
 #   overlaps = np.append(np.arange(0.5, 0.95, 0.05), 0.25)
 # Note 0.95 is EXCLUDED -- that arange stops at 0.9, so AP averages ten
