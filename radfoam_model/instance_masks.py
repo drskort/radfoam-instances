@@ -1,6 +1,6 @@
 """Load precomputed SAM label maps and align them with training rays.
 
-The masks come from `sam_masks` (see docs/sam_masks_findings.md) as one uint16
+The masks come from `sam_masks` as one uint16
 label PNG per frame per granularity level, with 0 meaning background.
 
 Two things have to line up for the loss to mean anything:

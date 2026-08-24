@@ -5,10 +5,9 @@ from a point grid fed to its tracker. Object Multiplex is what makes tracking a
 few hundred grid-seeded objects affordable.
 
 The video API is undocumented and two upstream defects must be worked around.
-Both are explained where they occur below and recorded in full, with source
-citations, in docs/plans/sam3-api-notes.md. Both poke at private
-state and are pinned to the sam3 checkout under external/sam_backends/sam3; if
-that checkout is bumped, re-verify them.
+Both are explained where they occur below. Both poke at private state and are
+pinned to the sam3 checkout under external/sam_backends/sam3; if that checkout
+is bumped, re-verify them.
 """
 
 import dataclasses

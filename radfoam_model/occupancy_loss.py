@@ -16,7 +16,7 @@ The second, less obvious prediction: a hollow shell has two interfaces, a solid
 object has one, so minimising interface area should FILL interiors. If that
 happens it addresses shells-over-vacuum -- 15.3% of cells sit at density 0.000
 at every percentile -- as a consequence of the same loss rather than a separate
-mechanism. See docs/specs/2026-08-11-occupancy-potts-prior-design.md.
+mechanism.
 """
 
 import torch

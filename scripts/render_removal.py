@@ -1,6 +1,7 @@
 """Remove one instance from a trained scene and re-render, by enclosure.
 
-Implements the decode-time removal described in `docs/scene_editing_handoff.md`.
+Removes instances at decode time: cells whose argmax label is in the removal
+set have their density zeroed before tracing, so no retraining is needed.
 Nothing is retrained and the triangulation is never rebuilt: removal is done by
 zeroing the density of the object's cells, which is what makes it safe to run at
 inference (`update_triangulation` calls `permute_points`, which touches the

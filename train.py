@@ -533,7 +533,7 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
 
 def main():
     parser = configargparse.ArgParser(
-        default_config_files=["arguments/mipnerf360_outdoor_config.yaml"]
+        default_config_files=["configs/mipnerf360_outdoor.yaml"]
     )
 
     model_params = ModelParams(parser)

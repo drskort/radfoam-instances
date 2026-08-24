@@ -94,10 +94,27 @@ def main():
         print(f"  {label(a):<30} vs {label(b):<30} "
               f"{mean:+6.2f} AP  wins {wins}/{len(scenes)}  sd {sd:5.2f}")
 
+    # Every metric's sem, not just AP's. Reporting the spread on the metric you
+    # lose and omitting it on the ones you win is the easiest way to mislead
+    # with a table like this.
     v = runs[HEADLINE]
-    ap_h = np.array([100 * v[s]["AP"] for s in scenes])
-    print(f"\nheadline spread {ap_h.min():.1f}-{ap_h.max():.1f} AP, "
-          f"sem +/-{ap_h.std(ddof=1) / np.sqrt(len(scenes)):.1f}")
+    print("\n=== headline dispersion over scenes ===")
+    print(f"  {'metric':<8}{'mean':>8}{'sd':>8}{'sem':>8}{'min':>7}{'max':>7}")
+    for k in ("AP", "AP50", "AP25"):
+        a = np.array([100 * v[s][k] for s in scenes])
+        print(f"  {k:<8}{a.mean():>8.2f}{a.std(ddof=1):>8.2f}"
+              f"{a.std(ddof=1) / np.sqrt(len(scenes)):>8.2f}"
+              f"{a.min():>7.1f}{a.max():>7.1f}")
+    ap = np.mean([100 * v[s]["AP"] for s in scenes])
+    ap25 = np.mean([100 * v[s]["AP25"] for s in scenes])
+    print(f"  AP25/AP ratio {ap25 / ap:.2f}   "
+          f"(OpenSplat3D 2.93, with their denoising 2.33)")
+
+    print("\n=== ground truth actually scored ===")
+    total = sum(v[s]["n_gt"] for s in scenes)
+    print("  " + "  ".join(f"{s[:6]}:{v[s]['n_gt']}" for s in scenes))
+    print(f"  {total} instances scored, after the 83-class benchmark "
+          f"restriction and the 100-vertex minimum")
 
 
 if __name__ == "__main__":

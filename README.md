@@ -28,11 +28,22 @@ mean over 8 scenes at 20k iterations):
 | this repo, HDBSCAN `min_cluster_size=512` | 17.7 | **42.3** | **65.6** |
 
 The baselines are on all 50 scenes of the validation split, this repo on the
-first 8. Per-scene AP ranges from 6.9 to 29.8, which puts the standard error of
-the mean at ±2.9 — the AP column separates nothing. AP50 and AP25 do: both are
-ahead of OpenSplat3D's denoised numbers. Objects are found and separated well
-and localised loosely, which is what cells with hard faces and no blending
-between them would predict.
+first 8, so no row here is like-for-like. Per-scene AP spans 6.9 to 29.8, giving
+a standard error of ±2.9 on the mean, and ±4.5 on AP50 and AP25 — wide enough
+that the 0.6 AP50 gap over OpenSplat3D's denoised result is no more defensible
+than the AP gap in the other direction. None of the three columns separates
+these methods on 8 scenes.
+
+What the numbers do support is a *shape*. AP25/AP is 3.7 here, against 2.9 for
+OpenSplat3D and 2.3 with their denoising: the ranking improves sharply as the
+IoU threshold loosens. Objects are found and separated; their boundaries are
+loose. That is what cells with hard faces and no blending between them would
+predict, and it is the claim this benchmark can actually carry.
+
+The headline row uses `--fill-noise --split-connected`. Both are part of the
+method, not tuning: HDBSCAN abstains on ~70% of cells, which costs nothing on a
+2D readout that skips unlabelled pixels and is a guaranteed miss in 3D. Without
+the fill the same model scores 10.84 AP — see [Clustering study](#clustering-study).
 
 **LERF-Mask** (grounded protocol, mean over figurines / ramen / teatime):
 
@@ -76,9 +87,9 @@ redistributed here. The default `siglip` encoder needs neither — it pulls
 ## Datasets
 
 No dataset is redistributed here. Each root is resolved by
-`radfoam_model/data_paths.py` in this order: an environment variable, then
-`data/<name>`, then a fallback for the cluster this was developed on. The
-intended setup is symlinks into `data/` (gitignored):
+`radfoam_model/data_paths.py`: an environment variable if set, else
+`data/<name>`. Set `RADFOAM_DATA` to move the whole tree. The intended setup is
+symlinks into `data/` (gitignored):
 
 ```bash
 mkdir -p data
@@ -135,18 +146,29 @@ checkpoint after preemption.
 python scripts/eval_scannetpp.py --checkpoint output/<run> --model model_020000.pt \
     --clustering hdbscan --min-cluster-size 512 --fill-noise --split-connected
 
-# LERF-Mask (grounded) and LERF-OVS
-python scripts/eval_lerf_mask.py --checkpoint output/<run>
-python scripts/eval_lerf_ovs.py  --checkpoint output/<run> --encoder siglip
+# LERF-Mask, grounded protocol -- this is the 83.1 / 77.9 row
+python scripts/eval_lerf_grounded.py --checkpoint output/<run>
+
+# LERF-OVS
+python scripts/eval_lerf_ovs.py --checkpoint output/<run> --encoder siglip
 ```
+
+Three grounding paths exist and they are not interchangeable.
+`eval_lerf_grounded.py` is OpenSplat3D's protocol — GroundingDINO + SAM ground
+the prompt in one reference frame, and every 3D instance projecting mostly
+inside that mask is selected; no language embedding is involved, and it is what
+produces the reported LERF-Mask numbers. `eval_lerf_mask.py` instead queries the
+per-instance SigLIP embeddings directly. `vlm_ground.py` is an exploratory
+Florence-2 captioning variant, tuned against failures on these same scenes, and
+is **not** used for any reported number.
 
 The LERF harnesses read a cached clustering; produce it once with
 `python scripts/foamviz.py cluster --checkpoint output/<run> --method full`.
 `scripts/eval_scannetpp.py` refits instead, so `--clustering` controls it directly.
 
-**4. Check the tables.** Every ScanNet++ number below is committed as the raw
+**4. Check the tables.** Every ScanNet++ number in this README is committed as the raw
 output of the command that produced it, under `results/scannetpp/<scene>/`
-(80 runs: 10 configurations x 8 scenes). Regenerate the tables from those files
+(80 runs: 10 configurations × 8 scenes). Regenerate the tables from those files
 rather than trusting the markdown:
 
 ```bash
@@ -158,21 +180,25 @@ python scripts/summarize_results.py
 The first 8 scenes of the official `nvs_sem_val.txt` split, in file order —
 a prefix rather than a sample, so the choice involves no selection. Frames are
 capped at 300 with a uniform stride, matching `num_frames: 300` in OpenSplat3D's
-`configs/scannetpp.yaml`. DSLR captures only. Per-scene AP is for the reported
-configuration.
+`MAX_FRAMES` in `data_loader/scannetpp.py`. DSLR captures only. Per-scene AP is
+for the reported configuration.
 
-| scene | frames used | GT instances | AP | AP50 | AP25 |
+| scene | frames used | GT scored | AP | AP50 | AP25 |
 |---|---|---|---|---|---|
-| `7b6477cb95` | 300 | 93 | 15.0 | 42.2 | 67.3 |
-| `c50d2d1d42` | 300 | 96 | 22.7 | 59.9 | 82.7 |
-| `cc5237fd77` | 300 | 97 | 6.9 | 21.6 | 45.2 |
-| `acd95847c5` | 300 | 114 | 21.5 | 48.0 | 70.7 |
-| `fb5a96b1a2` | 300 | 88 | 9.4 | 38.5 | 73.8 |
-| `a24f64f7fb` | 300 | 50 | 29.8 | 49.9 | 64.7 |
-| `1ada7a0617` | 300 | 68 | 25.1 | 50.2 | 71.5 |
-| `5eb31827b7` | 151 | 85 | 10.7 | 28.0 | 48.7 |
+| `7b6477cb95` | 300 | 48 | 15.0 | 42.2 | 67.3 |
+| `c50d2d1d42` | 300 | 39 | 22.7 | 59.9 | 82.7 |
+| `cc5237fd77` | 300 | 31 | 6.9 | 21.6 | 45.2 |
+| `acd95847c5` | 300 | 55 | 21.5 | 48.0 | 70.7 |
+| `fb5a96b1a2` | 300 | 56 | 9.4 | 38.5 | 73.8 |
+| `a24f64f7fb` | 300 | 18 | 29.8 | 49.9 | 64.7 |
+| `1ada7a0617` | 300 | 31 | 25.1 | 50.2 | 71.5 |
+| `5eb31827b7` | 151 | 33 | 10.7 | 28.0 | 48.7 |
 
-691 annotated instances in total. Regenerate the list with
+The scenes carry 691 annotated instances between them; **311** survive the
+restriction to the 83 instance-benchmark classes and the 100-vertex minimum that
+ScanNet++'s own scorer applies, and those are what the AP columns are computed
+against. The counts above are the `n_gt` field of the committed JSONs.
+Regenerate the scene list with
 `python -c "from data_loader.scannetpp import val_scenes; print(val_scenes()[:8])"`.
 
 ## Layout
@@ -189,6 +215,7 @@ configuration.
 | `sam_masks/` | SAM 2.1 / 3.1 mask precompute |
 | `radfoam_model/data_paths.py` | dataset root resolution (env var, then `data/`) |
 | `scripts/eval_*.py` | LERF-Mask, LERF-OVS, ScanNet++ harnesses |
+| `scripts/eval_lerf_grounded.py` | OpenSplat3D's LERF-Mask protocol (GroundingDINO + SAM) |
 | `scripts/summarize_results.py` | rebuilds the ScanNet++ tables from `results/` |
 | `results/scannetpp/` | raw eval output backing every number reported here |
 
@@ -228,8 +255,9 @@ more expensive.
 
 Cells carry a feature *and* sit in a Delaunay graph, so the partition can be
 found by clustering the features or by cutting the graph. Both were swept over
-the same 8 scenes and the same checkpoints — 8 configurations × 8 scenes, so
-every comparison below is paired and per-scene difficulty cancels.
+the same 8 scenes and the same checkpoints, so every comparison below is paired
+and per-scene difficulty cancels. Ten configurations were run; the eight with
+`--fill-noise` are below, the two without are further down.
 
 | clustering | AP | AP50 | AP25 |
 |---|---|---|---|
@@ -237,8 +265,14 @@ every comparison below is paired and per-scene difficulty cancels.
 | HDBSCAN `m=256` | 17.45 | 42.40 | 64.81 |
 | HDBSCAN `m=1024` | 17.42 | 42.44 | 63.33 |
 | multicut τ=0.3 `m=512` | 15.99 | 37.87 | 59.48 |
-| multicut + SAM votes, `w=1.0` | 15.98 | 36.71 | 59.68 |
+| multicut + SAM votes `m=1024`, `w=1.0` | 15.98 | 36.71 | 59.68 |
+| multicut τ=0.3 `m=1024` | 15.47 | 36.48 | 58.70 |
+| multicut + SAM votes `m=1024`, `w=0.0` | 15.47 | 36.48 | 58.70 |
 | multicut τ=0.3 `m=2048` | 13.75 | 32.52 | 56.81 |
+
+The last two rows are identical on all 8 scenes and every field: `w=0.0` reduces
+exactly to plain multicut at the same `min_size`, which is the control the
++0.51 AP figure below is measured against.
 
 **Multicut loses, by 1.66 AP on 2 of 8 scenes won.** SAM co-occurrence votes on
 the graph edges are worth +0.51 AP on 5 of 8 — inside the scene-to-scene spread,
@@ -246,9 +280,11 @@ so not a result. HDBSCAN is also insensitive to `min_cluster_size` (256/512/1024
 span 0.23 AP), while multicut's grid spans 2.24, so the graph method is the more
 tuning-sensitive of the two as well.
 
-Two things cut the other way. Multicut is **16× cheaper**: 23 s against 368 s per
-scene end-to-end on a 3090, where the cuML HDBSCAN fit is ~100% of its own
-runtime and ~84 s of that is one-time initialisation. And with `--fill-noise`
+Two things cut the other way. Multicut is **16× cheaper** per scene as run
+here: 23 s against 368 s end-to-end on a 3090. Profiling puts essentially all of
+HDBSCAN's cost in the cuML fit itself — data transfer and centroids are under
+0.1 s — of which ~84 s is one-time initialisation, so a process fitting
+repeatedly would see ~12× rather than 16×. And with `--fill-noise`
 off, multicut **wins 8 of 8 scenes** by 2.20 AP (13.03 vs 10.84) and its clusters
 need no connected-component split at all, being connected by construction.
 
@@ -258,9 +294,9 @@ worth +6.82 AP to HDBSCAN but only +2.96 to multicut. The graph encodes real
 structure — it is simply the cheaper post-hoc step that encodes more.
 
 ```bash
-# reproduce either arm
 python scripts/eval_scannetpp.py --checkpoint output/<run> --model model_020000.pt \
-    --clustering multicut --tau 0.3 --min-cluster-size 512 --split-connected
+    --clustering multicut --tau 0.3 --min-cluster-size 512 \
+    --fill-noise --split-connected      # drop --fill-noise for the no-fill arm
 ```
 
 ## Scene editing
@@ -285,8 +321,14 @@ geometry; inpainting is not addressed here.
 
 ## Attribution
 
-Built on [Radiant Foam](https://github.com/theialab/radfoam) (Apache 2.0) — the
-renderer, tracer and Delaunay machinery are theirs. `third_party/masqclip.py` is
+My contribution is `radfoam_model/instance_*`, `occupancy_loss.py`,
+`variance_loss.py`, `scannetpp_eval.py`, `data_paths.py`, all of `sam_masks/`
+and `scripts/`, the ScanNet++ loader in `data_loader/`, and the feature and
+feature-squared accumulation with its analytic backward inside
+`src/tracing/pipeline.cu`. Everything else — the renderer, tracer, Delaunay
+machinery, build system and viewer — is upstream.
+
+Built on [Radiant Foam](https://github.com/theialab/radfoam) (Apache 2.0). `third_party/masqclip.py` is
 vendored from [OpenSplat3D](https://github.com/VisualComputingInstitute/opensplat3d),
 which adapts [MasQCLIP](https://github.com/mlpc-ucsd/MasQCLIP). Method and
 evaluation protocols follow OpenSplat3D.

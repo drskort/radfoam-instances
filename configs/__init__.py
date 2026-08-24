@@ -47,11 +47,11 @@ class PipelineParams(ParamGroup):
         self.densify_factor = 1.15
         self.white_background = True
         self.quantile_weight = 1e-4
-        # Contrastive instance features. instance_weight = 0 disables the loss
-        # entirely; instance_guided_geometry lets it also shape density.
         # Save model.pt every N iterations, plus a numbered snapshot so
         # intermediate scenes can be rendered. 0 disables.
         self.checkpoint_every = 2_000
+        # Contrastive instance features. instance_weight = 0 disables the loss
+        # entirely; instance_guided_geometry lets it also shape density.
         self.instance_weight = 0.1
         self.variance_weight = 0.5
         # Iteration at which instance_guided_geometry starts taking effect.
@@ -62,9 +62,6 @@ class PipelineParams(ParamGroup):
         # instance_levels. See multi_level_instance_loss for why they are not
         # all 1.0 by default in every experiment.
         self.instance_level_weights = [1.0, 1.0, 1.0]
-        # Potts prior on the occupancy field: commit every cell to solid or
-        # empty, and minimise the interface between them. Both zero disables it.
-        # See docs/specs/2026-08-11-occupancy-potts-prior-design.md.
         # Continue from an existing checkpoint rather than initialising from
         # COLMAP points. Requires densification off; see train.py.
         self.resume_from = ""
@@ -73,11 +70,12 @@ class PipelineParams(ParamGroup):
         # restarted the counter at 0 would slam a converged model with the
         # initial learning rate.
         self.start_iteration = 0
-        # Print a timestamped line around every triangulation
-        # rebuild. The occupancy prior hangs only when sites are
-        # free to move, and rebuild() is the one call on that
-        # path the frozen probes never make.
+        # Print a timestamped line around every triangulation rebuild. Retriangulation
+        # cost grows with the occupancy prior only when sites are still moving, which
+        # the frozen probes never exercise.
         self.debug_triangulation = False
+        # Potts prior on the occupancy field: commit every cell to solid or
+        # empty, and minimise the interface between them. Both zero disables it.
         self.occupancy_bin_weight = 0.0
         self.occupancy_tv_weight = 0.0
         self.occupancy_penalty = "entropy"
