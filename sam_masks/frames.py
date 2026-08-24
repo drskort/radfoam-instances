@@ -5,8 +5,8 @@ mip-NeRF 360 images are named like DSC07956.JPG, and for these captures filename
 order is capture order along the orbit, so it is the default. Pose ordering is
 available as a diagnostic for whether ordering matters at all.
 
-Symlinks, not copies: /shared is at quota and read-only, and the datasets are
-24 GB.
+Symlinks, not copies: the source captures are tens of GB and typically live on
+read-only shared storage.
 """
 
 import json
