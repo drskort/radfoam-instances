@@ -24,7 +24,7 @@
 set -euo pipefail
 
 SCENE="${1:-garden}"
-DATA_PATH="${DATA_PATH:-/shared/user/datasets}"
+DATA_PATH="${DATA_PATH:-data/mipnerf360}"
 CUDA_MODULE="${CUDA_MODULE:-cuda/12.1}"
 VENV_DIR="${VENV_DIR:-.venv}"
 
