@@ -51,18 +51,23 @@ the fill the same model scores 10.84 AP — see [Clustering study](#clustering-s
 |---|---|---|
 | Gaussian Grouping | 72.8 | 67.6 |
 | ILGS (ICCV 2025) | 80.5 | 76.0 |
-| this repo | 83.1 | 77.9 |
+| this repo | 82.7 | 77.7 |
 | OpenSplat3D | 84.0 | — |
+
+Per scene: figurines 91.15 / 88.91, ramen 75.74 / 68.68, teatime 81.16 / 75.62,
+committed under `results/lerf_mask/`. An earlier run of the same configuration
+scored 83.13 / 77.87; its checkpoint was lost, so the numbers above are from a
+retrain and are the ones backed by artifacts. The 0.45 mIoU difference between
+the two is within the seed-to-seed variation measured on this benchmark.
 
 **LERF-OVS** (4 scenes, flat mIoU): 66.1 with SigLIP-so400m, 63.3 with MasQCLIP,
 against 59.7 for OpenSplat3D. Single runs — see [Notes](#notes).
 
-> The two LERF tables are **not yet backed by committed artifacts**. The
-> checkpoints that produced them were deleted in a disk cleanup, so unlike the
-> ScanNet++ numbers they cannot currently be re-derived from anything in this
-> repo. They are being regenerated; until `results/lerf_mask/` and
-> `results/lerf_ovs/` exist, treat these two tables as reported-but-unverified
-> and the ScanNet++ table as the one with evidence behind it.
+> LERF-OVS is **not** backed by a committed artifact — the checkpoint behind it
+> was lost and it has not been regenerated. It is a single run of a metric that
+> moved by several mIoU between repeats, so it is reported for completeness and
+> nothing here rests on it. ScanNet++ and LERF-Mask both have their raw eval
+> output committed.
 
 ## Install
 
@@ -165,8 +170,12 @@ checkpoint after preemption.
 python scripts/eval_scannetpp.py --checkpoint output/<run> --model model_020000.pt \
     --clustering hdbscan --min-cluster-size 512 --fill-noise --split-connected
 
-# LERF-Mask, grounded protocol -- this is the 83.1 / 77.9 row
-python scripts/eval_lerf_grounded.py --checkpoint output/<run>
+# LERF-Mask, grounded protocol -- this is the 82.7 / 77.7 row.
+# --clustering hdbscan_full is required: it reads the cached per-cell labels
+# and uses the argmax readout. The default (hdbscan) refits on a 60k subsample
+# and reads out by centroid, which loses small objects and scores ~4 mIoU lower.
+python scripts/eval_lerf_grounded.py --checkpoint output/<run> \
+    --model model_020000.pt --clustering hdbscan_full
 
 # LERF-OVS
 python scripts/eval_lerf_ovs.py --checkpoint output/<run> --encoder siglip
@@ -185,7 +194,11 @@ The LERF harnesses read a cached clustering; produce it once with
 `python scripts/foamviz.py cluster --checkpoint output/<run> --method full`.
 `scripts/eval_scannetpp.py` refits instead, so `--clustering` controls it directly.
 
-**4. Check the tables.** Every ScanNet++ number in this README is committed as the raw
+`eval_lerf_grounded.py` pulls `IDEA-Research/grounding-dino-base` and
+`facebook/sam-vit-huge` from the Hub on first use. Compute nodes are often
+offline, so warm the cache from a machine with network access before submitting.
+
+**4. Check the tables.** Every ScanNet++ and LERF-Mask number in this README is committed as the raw
 output of the command that produced it, under `results/scannetpp/<scene>/`
 (80 runs: 10 configurations × 8 scenes). Regenerate the tables from those files
 rather than trusting the markdown:
@@ -236,7 +249,7 @@ Regenerate the scene list with
 | `scripts/eval_*.py` | LERF-Mask, LERF-OVS, ScanNet++ harnesses |
 | `scripts/eval_lerf_grounded.py` | OpenSplat3D's LERF-Mask protocol (GroundingDINO + SAM) |
 | `scripts/summarize_results.py` | rebuilds the ScanNet++ tables from `results/` |
-| `results/scannetpp/` | raw eval output backing every number reported here |
+| `results/scannetpp/`, `results/lerf_mask/` | raw eval output backing the reported numbers |
 
 ## Implementation notes
 

@@ -344,6 +344,7 @@ def main():
     truth = load_ground_truth(scene_dir)
 
     labels = None
+    used_cache = False
     if args.clustering == "hdbscan_aug":
         from radfoam_model.instance_cluster import fit_clusters_augmented
         labels, clustering = fit_clusters_augmented(
@@ -369,11 +370,13 @@ def main():
             clustering, labels = load_cached_clustering(
                 args.checkpoint, model.att_feat
             )
+            used_cache = clustering is not None
             if clustering is not None and labels is None:
                 print("cached clustering has no per-cell labels (sampled fit); "
                       "the argmax readout needs them -- refitting")
                 clustering = None
         if clustering is None:
+            used_cache = False
             if not args.refit:
                 print("no usable cache; fitting (run `foamviz.py cluster "
                       "--checkpoint ... --method full` to avoid this)")
@@ -649,7 +652,11 @@ def main():
         "decoder": args.decoder,
         "density_weight": bool(args.density_weight),
         "with_position": args.with_position, "with_color": args.with_color,
-        "used_cache": not args.refit,
+        "cache_requested": not args.refit,
+        # whether a cached per-cell clustering was actually read, which
+        # only the hdbscan_full path does -- "not args.refit" alone says
+        # nothing about it and reads as confirmation when it is not.
+        "used_cache": bool(used_cache),
         "min_cluster_size": args.min_cluster_size,
         "min_samples": args.min_samples,
         "selection_epsilon": args.selection_epsilon,

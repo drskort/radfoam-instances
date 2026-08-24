@@ -57,6 +57,26 @@ def paired(runs, scenes, a, b):
     return d.mean(), int((d > 0).sum()), d.std(ddof=1)
 
 
+def lerf_mask(root):
+    """Rebuild the LERF-Mask table from results/lerf_mask/<scene>.json."""
+    rows = []
+    order = {"figurines": 0, "ramen": 1, "teatime": 2}
+    for path in sorted(root.glob("*.json")):
+        d = json.loads(path.read_text())
+        rows.append((d["scene"], 100 * d["miou"], 100 * d["mbiou"],
+                     d.get("clustering"), d.get("readout")))
+    rows.sort(key=lambda r: order.get(r[0], 99))
+    if not rows:
+        return
+    print("\n=== LERF-Mask, grounded protocol ===")
+    print(f"  {'scene':<12}{'mIoU':>8}{'mBIoU':>8}   config")
+    for s, a, b, c, r in rows:
+        print(f"  {s:<12}{a:>8.2f}{b:>8.2f}   {c}/{r}")
+    print(f"  {'MEAN':<12}{np.mean([r[1] for r in rows]):>8.2f}"
+          f"{np.mean([r[2] for r in rows]):>8.2f}")
+    print("  Gaussian Grouping 72.8/67.6   ILGS 80.5/76.0   OpenSplat3D 84.0/-")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--results", type=Path, default=RESULTS)
@@ -115,6 +135,10 @@ def main():
     print("  " + "  ".join(f"{s[:6]}:{v[s]['n_gt']}" for s in scenes))
     print(f"  {total} instances scored, after the 83-class benchmark "
           f"restriction and the 100-vertex minimum")
+
+    lerf = args.results.parent / "lerf_mask"
+    if lerf.is_dir():
+        lerf_mask(lerf)
 
 
 if __name__ == "__main__":
