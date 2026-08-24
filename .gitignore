@@ -21,11 +21,8 @@ __pycache__
 # Scratch: throwaway probes, one-off diagnostics, deck-building scripts.
 /.scratch/
 
-# Decks and their sources are shared out of band, not versioned (tens of MB).
-docs/*.pptx
-
-# Planning notes from the assistant workflow, not part of the method.
-docs/
+# Local working notes and decks: shared out of band, not part of the method.
+/docs/
 
 # MasQCLIP weights: 1.5 GB each, from the MasQCLIP release, not ours to ship.
 ckpts/

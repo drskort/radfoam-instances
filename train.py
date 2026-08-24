@@ -286,8 +286,9 @@ def train(args, pipeline_args, model_args, optimizer_args, dataset_args):
                 #
                 # NOTE the subtraction below is deliberately NOT under
                 # no_grad: autograd carries the d(s^2)/dF = -2F path into
-                # grad_feature, and the kernel relies on that. See
-                # docs/variance_backward.md.
+                # grad_feature, and the kernel relies on that -- it supplies
+                # only the explicit d(s^2)/dV = 1 term itself. Checked end to
+                # end by scripts/gradcheck_variance.py.
                 if (
                     _feature_squared is not None
                     and model.feat_dim > 0

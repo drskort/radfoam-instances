@@ -7,17 +7,17 @@ and queries those objects with text. Follows the method of
 tessellation instead of Gaussian splats.
 
 <p align="center">
-  <img src="docs/assets/teatime_instances/frame_0025.jpg" width="49%">
-  <img src="docs/assets/snpp_instances/frame_0025.jpg" width="49%">
+  <img src="assets/teatime_instances/frame_0025.jpg" width="49%">
+  <img src="assets/snpp_instances/frame_0025.jpg" width="49%">
   <br><sub>Instances rendered by argmax over per-cell identity — LERF teatime, ScanNet++ room.
-  Videos: <a href="docs/assets/teatime_instances/instances_model_020000.mp4">teatime</a>,
-  <a href="docs/assets/snpp_instances/instances_model_016000.mp4">ScanNet++</a></sub>
+  Videos: <a href="assets/teatime_instances/instances_model_020000.mp4">teatime</a>,
+  <a href="assets/snpp_instances/instances_model_016000.mp4">ScanNet++</a></sub>
 </p>
 
 ## Results
 
 **ScanNet++ 3D instance segmentation** (class-agnostic, scored on mesh points,
-mean over [8 scenes](docs/scannetpp_subset.md) at 20k iterations):
+mean over 8 scenes at 20k iterations):
 
 | method | AP | AP50 | AP25 |
 |---|---|---|---|
@@ -28,11 +28,11 @@ mean over [8 scenes](docs/scannetpp_subset.md) at 20k iterations):
 | this repo, HDBSCAN `min_cluster_size=512` | 17.7 | **42.3** | **65.6** |
 
 The baselines are on all 50 scenes of the validation split, this repo on the
-first 8. Per-scene AP here ranges from 6.9 to 29.8, which puts the standard
-error of the mean at ±2.9 — the AP column separates nothing. AP50 and AP25 do:
-both are ahead of OpenSplat3D's denoised numbers. Objects are found and
-separated well and localised loosely, which is what cells with hard faces and no
-blending between them would predict.
+first 8. Per-scene AP ranges from 6.9 to 29.8, which puts the standard error of
+the mean at ±2.9 — the AP column separates nothing. AP50 and AP25 do: both are
+ahead of OpenSplat3D's denoised numbers. Objects are found and separated well
+and localised loosely, which is what cells with hard faces and no blending
+between them would predict.
 
 **LERF-Mask** (grounded protocol, mean over figurines / ramen / teatime):
 
@@ -44,7 +44,7 @@ blending between them would predict.
 | OpenSplat3D | 84.0 | — |
 
 **LERF-OVS** (4 scenes, flat mIoU): 66.1 with SigLIP-so400m, 63.3 with MasQCLIP,
-against 59.7 for OpenSplat3D. Single runs — see notes below.
+against 59.7 for OpenSplat3D. Single runs — see [Notes](#notes).
 
 ## Install
 
@@ -59,27 +59,69 @@ pip install cuml-cu12 transformers open-clip-torch plyfile
 MasQCLIP weights (optional, for the `masqclip` encoder) go in
 `ckpts/MasQCLIP/base_novel.pth`; they are not redistributed here.
 
-## Usage
+## Reproducing the numbers
+
+Every stage has a Slurm wrapper alongside it in `scripts/*_slurm.sh`; the plain
+commands below are what those wrappers run.
+
+**1. Precompute SAM masks** (resumable; the mask store is keyed by scene and tag)
 
 ```bash
-# 1. precompute SAM masks for a scene (resumable)
 python -m sam_masks.run_image --scene teatime --model sam21_levels --tag t70
+```
 
-# 2. train with instance features
+**2. Train with instance features**
+
+```bash
+# LERF
 python train.py -c configs/lerf_mask.yaml --scene teatime \
     --instance_guided_geometry --instance_weight 0.1 --variance_weight 0.5
 
-# 3. cluster once; every downstream consumer reads the cache
-python scripts/foamviz.py cluster --checkpoint output/<run> --method full
-
-# 4. evaluate
-python scripts/eval_lerf_mask.py  --checkpoint output/<run>
-python scripts/eval_lerf_ovs.py   --checkpoint output/<run> --encoder siglip
-python scripts/eval_scannetpp.py  --checkpoint output/<run> \
-    --clustering hdbscan --min-cluster-size 512 --fill-noise --split-connected
+# ScanNet++ (20k iterations, 300 frames per scene)
+python train.py -c configs/scannetpp.yaml --scene 7b6477cb95 \
+    --instance_guided_geometry --instance_weight 0.1 --variance_weight 0.5
 ```
 
-Slurm wrappers for each stage are in `scripts/*_slurm.sh`.
+`scripts/train_resumable_slurm.sh` wraps this to restart from the newest
+checkpoint after preemption.
+
+**3. Evaluate**
+
+```bash
+# ScanNet++ 3D AP -- the headline table
+python scripts/eval_scannetpp.py --checkpoint output/<run> --model model_020000.pt \
+    --clustering hdbscan --min-cluster-size 512 --fill-noise --split-connected
+
+# LERF-Mask (grounded) and LERF-OVS
+python scripts/eval_lerf_mask.py --checkpoint output/<run>
+python scripts/eval_lerf_ovs.py  --checkpoint output/<run> --encoder siglip
+```
+
+The LERF harnesses read a cached clustering; produce it once with
+`python scripts/foamviz.py cluster --checkpoint output/<run> --method full`.
+`scripts/eval_scannetpp.py` refits instead, so `--clustering` controls it directly.
+
+### ScanNet++ subset
+
+The first 8 scenes of the official `nvs_sem_val.txt` split, in file order —
+a prefix rather than a sample, so the choice involves no selection. Frames are
+capped at 300 with a uniform stride, matching `num_frames: 300` in OpenSplat3D's
+`configs/scannetpp.yaml`. DSLR captures only. Per-scene AP is for the reported
+configuration.
+
+| scene | frames used | GT instances | AP | AP50 | AP25 |
+|---|---|---|---|---|---|
+| `7b6477cb95` | 300 | 93 | 15.0 | 42.2 | 67.3 |
+| `c50d2d1d42` | 300 | 96 | 22.7 | 59.9 | 82.7 |
+| `cc5237fd77` | 300 | 97 | 6.9 | 21.6 | 45.2 |
+| `acd95847c5` | 300 | 114 | 21.5 | 48.0 | 70.7 |
+| `fb5a96b1a2` | 300 | 88 | 9.4 | 38.5 | 73.8 |
+| `a24f64f7fb` | 300 | 50 | 29.8 | 49.9 | 64.7 |
+| `1ada7a0617` | 300 | 68 | 25.1 | 50.2 | 71.5 |
+| `5eb31827b7` | 151 | 85 | 10.7 | 28.0 | 48.7 |
+
+691 annotated instances in total. Regenerate the list with
+`python -c "from data_loader.scannetpp import val_scenes; print(val_scenes()[:8])"`.
 
 ## Layout
 
@@ -99,8 +141,8 @@ Slurm wrappers for each stage are in `scripts/*_slurm.sh`.
 
 **Variance loss.** The renderer accumulates `V = Σ wₙ fₙ²` alongside
 `F = Σ wₙ fₙ`, so `s² = V − F²` penalises rays whose cells disagree. The
-backward pass is derived in [`docs/variance_backward.md`](docs/variance_backward.md)
-and checked with `torch.autograd.gradcheck` (`scripts/gradcheck_variance.py`).
+backward pass is analytic, in `src/tracing/pipeline.cu`, and checked against
+`torch.autograd.gradcheck` by `scripts/gradcheck_variance.py`.
 
 **Point assignment.** Mesh points are assigned to the nearest cell *that renders*
 (density > 1e-3), not the nearest cell. About a third of cells never render, and
@@ -108,7 +150,7 @@ plain nearest-site lands in one of them 25% of the time.
 
 **Connected-component split.** Instances are split into spatially connected
 components using the Delaunay adjacency, which is the exact form of the DBSCAN
-step OpenSplat3D applies to Gaussian positions. Worth +3.3 AP here.
+step OpenSplat3D applies to Gaussian positions.
 
 ## Ablations
 
@@ -127,11 +169,50 @@ commitment is deletion, the total-variation term does not measurably contribute,
 and with sites still moving it makes incremental Delaunay updates progressively
 more expensive.
 
+## Clustering study
+
+Cells carry a feature *and* sit in a Delaunay graph, so the partition can be
+found by clustering the features or by cutting the graph. Both were swept over
+the same 8 scenes and the same checkpoints — 8 configurations × 8 scenes, so
+every comparison below is paired and per-scene difficulty cancels.
+
+| clustering | AP | AP50 | AP25 |
+|---|---|---|---|
+| HDBSCAN `m=512` | **17.65** | 42.29 | 65.56 |
+| HDBSCAN `m=256` | 17.45 | 42.40 | 64.81 |
+| HDBSCAN `m=1024` | 17.42 | 42.44 | 63.33 |
+| multicut τ=0.3 `m=512` | 15.99 | 37.87 | 59.48 |
+| multicut + SAM votes, `w=1.0` | 15.98 | 36.71 | 59.68 |
+| multicut τ=0.3 `m=2048` | 13.75 | 32.52 | 56.81 |
+
+**Multicut loses, by 1.66 AP on 2 of 8 scenes won.** SAM co-occurrence votes on
+the graph edges are worth +0.51 AP on 5 of 8 — inside the scene-to-scene spread,
+so not a result. HDBSCAN is also insensitive to `min_cluster_size` (256/512/1024
+span 0.23 AP), while multicut's grid spans 2.24, so the graph method is the more
+tuning-sensitive of the two as well.
+
+Two things cut the other way. Multicut is **16× cheaper**: 23 s against 368 s per
+scene end-to-end on a 3090, where the cuML HDBSCAN fit is ~100% of its own
+runtime and ~84 s of that is one-time initialisation. And with `--fill-noise`
+off, multicut **wins 8 of 8 scenes** by 2.20 AP (13.03 vs 10.84) and its clusters
+need no connected-component split at all, being connected by construction.
+
+The resolution is that filling abstaining cells by nearest centroid in feature
+space supplies the same spatial coherence the graph does, and more of it: it is
+worth +6.82 AP to HDBSCAN but only +2.96 to multicut. The graph encodes real
+structure — it is simply the cheaper post-hoc step that encodes more.
+
+```bash
+# reproduce either arm
+python scripts/eval_scannetpp.py --checkpoint output/<run> --model model_020000.pt \
+    --clustering multicut --tau 0.3 --min-cluster-size 512 --split-connected
+```
+
 ## Scene editing
 
 <p align="center">
-  <img src="docs/assets/teatime_removal/remove_400_frame0040.jpg" width="49%">
-  <img src="docs/assets/teatime_removal/remove_416_frame0040.jpg" width="49%">
+  <img src="assets/teatime_removal/remove_400_frame0040.jpg" width="49%">
+  <img src="assets/teatime_removal/remove_416_frame0040.jpg" width="49%">
 </p>
 
 Instances can be removed and the scene re-rendered. Objects are reconstructed as
@@ -140,19 +221,12 @@ geometry; inpainting is not addressed here.
 
 ## Notes
 
-- **Multicut loses to plain feature clustering.** Over the 8 scenes, multicut on
-  the Delaunay graph (τ=0.3) is 1.7 AP behind HDBSCAN at matched `min_size` and
-  wins 2 of 8 scenes. Adding SAM-derived edge votes moves it +0.5 AP on 5 of 8,
-  which is inside the scene-to-scene noise. The graph structure is load-bearing
-  for the connected-component split, not for the partition itself. Kept in
-  `instance_graph.py` as a negative result.
-- HDBSCAN is insensitive to `min_cluster_size`: 256, 512 and 1024 span 0.23 AP,
-  so the reported setting is not tuned. Reproduce with
-  `scripts/eval_scannetpp.py --clustering hdbscan`.
-- The connected-component and point-assignment gains quoted above are measured
-  on one scene; the 8-scene table applies both throughout.
+- The connected-component and point-assignment gains are measured on one scene;
+  the 8-scene tables apply both throughout.
 - LERF-OVS results come from single runs and moved by several mIoU between
   repeats in the cases checked, so treat small differences there with care.
+- `test.py` and `benchmark.py` at the root are upstream Radiant Foam's novel-view
+  PSNR harnesses, kept as they are.
 
 ## Attribution
 

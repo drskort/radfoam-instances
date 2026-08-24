@@ -1,0 +1,37 @@
+{
+  "sigma_solid": 10.477609634399414,
+  "instances": [
+    {
+      "instance": 400,
+      "core_cells": 130658,
+      "shell_cells": 281153,
+      "interior_cells": 1237,
+      "volume_cells": 282390,
+      "leaked": false
+    },
+    {
+      "instance": 416,
+      "core_cells": 53065,
+      "shell_cells": 225077,
+      "interior_cells": 1909,
+      "volume_cells": 226986,
+      "leaked": false
+    },
+    {
+      "instance": 405,
+      "core_cells": 23413,
+      "shell_cells": 71481,
+      "interior_cells": 413,
+      "volume_cells": 71894,
+      "leaked": false
+    },
+    {
+      "instance": 356,
+      "core_cells": 21702,
+      "shell_cells": 36858,
+      "interior_cells": 59,
+      "volume_cells": 36917,
+      "leaked": false
+    }
+  ]
+}
