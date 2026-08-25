@@ -23,11 +23,7 @@ import torch
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from radfoam_model.instance_cluster import (  # noqa: E402
-    NOISE_ID,
-    assign,
-    fit_clusters,
-)
+from radfoam_model.instance_cluster import fit_clusters  # noqa: E402
 
 def clustering_cache_path(checkpoint: Path) -> Path:
     return Path(checkpoint) / "instances" / "clustering.pt"

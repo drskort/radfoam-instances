@@ -37,6 +37,7 @@ import torch
 
 from configs import *  # noqa: F401,F403  (ParamGroup definitions)
 from data_loader import DataHandler
+from radfoam_model.checkpoint import load_model  # noqa: E402
 from radfoam_model.scene import RadFoamScene
 
 from radfoam_model.instance_cluster import (  # noqa: E402

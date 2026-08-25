@@ -88,7 +88,7 @@ Follow the upstream [Radiant Foam](https://github.com/theialab/radfoam) build
 for the CUDA extension, then:
 
 ```bash
-git clone --recursive https://github.com/<you>/radfoam-instances   # six submodules
+git clone --recursive <this repo>   # --recursive: six submodules under external/
 pip install torch==2.3.0 torchvision==0.18.0 --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
 pip install -e .
@@ -105,7 +105,9 @@ Optional, only for the `masqclip` language encoder:
 pip install git+https://github.com/openai/CLIP.git   # OpenAI CLIP, not on PyPI
 ```
 
-and put the MasQCLIP weights at `ckpts/MasQCLIP/base_novel.pth`. They come from
+and put the MasQCLIP weights at `ckpts/MasQCLIP/base_novel.pth`, resolved
+relative to the working directory (the Slurm wrapper sets `WORKSPACE_PATH` for
+this; running from the repo root does the same). They come from
 the [MasQCLIP release](https://github.com/mlpc-ucsd/MasQCLIP) and are not
 redistributed here. `eval_lerf_ovs.py` defaults to `--encoder masqclip`,
 matching OpenSplat3D; pass `--encoder siglip` to avoid the checkpoint entirely,
@@ -116,8 +118,14 @@ and is the setting behind the higher of the two LERF-OVS numbers.
 
 No dataset is redistributed here. Each root is resolved by
 `radfoam_model/data_paths.py`: an environment variable if set, else
-`data/<name>`. Set `RADFOAM_DATA` to move the whole tree. The intended setup is
-symlinks into `data/` (gitignored):
+`data/<name>`, with `RADFOAM_DATA` moving that whole directory.
+
+One caveat: this covers the **eval-side** roots — the SAM mask store, the
+ScanNet++ mesh, metadata and splits, and the LERF-OVS labels. Training images
+come from `data_path` in the YAML config (`configs/*.yaml`), which is baked into
+each run's `config.yaml` and re-read by anything that reloads that run, so it is
+a relative path and commands are run from the repo root. The intended setup is
+symlinks into `data/` (gitignored), which satisfies both:
 
 ```bash
 mkdir -p data
@@ -158,7 +166,13 @@ bash sam_masks/scripts/setup_env.sh      # needs `uv` on PATH
 python -m sam_masks.run_image --scene teatime --model sam21_levels --tag t70
 ```
 
-The tag is not free-form: training looks for the arm `sam21_levels_image_t70`
+`t70` names a threshold set, not just a directory: 32×32 point grid,
+`pred_iou_thresh=0.70`, `stability_thresh=0.88`, chosen over the defaults
+(16×16 / 0.8 / 0.95) because it reaches 0.946 mask coverage against 0.978 at a
+third of the over-segmentation. `TAG_PRESETS` in `sam_masks/automask.py` applies
+it, so the tag and the settings cannot drift apart; explicit flags still
+override. The tag is also not free-form: training looks for the arm
+`sam21_levels_image_t70`
 (`DEFAULT_ARM` in `radfoam_model/instance_masks.py`), so `--model sam21_levels
 --tag t70` must match. Training aborts with an explicit error if the masks are
 missing rather than quietly skipping the instance loss.
@@ -245,7 +259,11 @@ for the reported configuration.
 | `1ada7a0617` | 300 | 31 | 25.1 | 50.2 | 71.5 |
 | `5eb31827b7` | 151 | 33 | 10.7 | 28.0 | 48.7 |
 
-The scenes carry 691 annotated instances between them; **311** survive the
+The `frames used` column is a property of the loader (`MAX_FRAMES` capped
+against the frames on disk), not of the eval, so it is the one column here that
+`summarize_results.py` does not regenerate; every other figure in this table
+comes from the committed JSONs. The scenes carry 691 annotated instances
+between them; **311** survive the
 restriction to the 83 instance-benchmark classes and the 100-vertex minimum that
 ScanNet++'s own scorer applies, and those are what the AP columns are computed
 against. The counts above are the `n_gt` field of the committed JSONs.

@@ -102,8 +102,9 @@ class DataHandler:
                     f"(arm '{DEFAULT_ARM}') under "
                     f"{[str(r) for r in DEFAULT_MASK_ROOTS]}.\n"
                     "Run `python -m sam_masks.run_image --scene "
-                    f"{self.args.scene} --model sam21_levels --tag t70` first, "
-                    "or pass --instance_weight 0 to train radiance only."
+                    f"{self.args.scene} --model sam21_levels --tag t70` first "
+                    "(the tag selects its threshold preset), or pass "
+                    "--instance_weight 0 to train radiance only."
                 )
             else:
                 print(f"instance masks: none found for {self.args.scene}")

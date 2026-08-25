@@ -36,6 +36,26 @@ class AutomaskConfig:
     min_mask_area: int = 1
 
 
+# Named threshold sets. The arm directory is suffixed with the tag, and every
+# reported number was produced with `t70` -- so the tag has to *imply* these
+# settings rather than merely label them. Passing --tag t70 without them used to
+# write default-threshold masks into a directory called t70, silently.
+TAG_PRESETS = {
+    "t70": dict(points_per_side=32, pred_iou_thresh=0.70, stability_thresh=0.88),
+    "t60": dict(points_per_side=32, pred_iou_thresh=0.60, stability_thresh=0.80),
+}
+
+
+def apply_tag_preset(config, tag):
+    """Fold a named preset into `config`, returning the names it set."""
+    preset = TAG_PRESETS.get(tag)
+    if not preset:
+        return ()
+    for key, value in preset.items():
+        setattr(config, key, value)
+    return tuple(preset)
+
+
 def point_grid(points_per_side, height, width):
     """Return an (N, 2) integer array of (x, y) grid points inside the image.
 

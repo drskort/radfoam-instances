@@ -33,7 +33,7 @@ BENCHMARK_CLASSES = SCANNETPP_META / "semantic_benchmark" / "top100_instance.txt
 # thresholds from 0.50 to 0.90, not ten from 0.50 to 0.95. Rounded because arange on a
 # float step yields 0.6000000000000001, and an instance overlapping at exactly
 # 0.6 would otherwise fail its own threshold.
-# (submodules/scannetpp/scannetpp/semantic/utils/instance_utils.py)
+# (github.com/scannetpp/scannetpp: scannetpp/semantic/utils/instance_utils.py)
 IOU_THRESHOLDS = np.round(np.arange(0.5, 0.95, 0.05), 2)
 # Ground-truth instances smaller than this are dropped by their scorer.
 MIN_REGION_SIZE = 100
@@ -286,7 +286,7 @@ def average_precision(predictions, gt_instances, n_vertices, void=None):
         proportion_ignore = num_ignore / pred["vert_count"]
         if proportion_ignore <= overlap_th:   # only then a false positive
 
-    (submodules/scannetpp/.../eval_instance.py). Without this a method that
+    (github.com/scannetpp/scannetpp: .../eval_instance.py). Without this a method that
     segments the whole scene is punished for correctly finding the wall, while
     one that only proposes vocabulary objects is not -- which is a difference
     in what the methods attempt, not in how well they do it. Omitting it cost

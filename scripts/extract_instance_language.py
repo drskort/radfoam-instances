@@ -41,6 +41,7 @@ from PIL import Image
 
 from configs import *  # noqa: F401,F403
 from data_loader import DataHandler
+from radfoam_model.checkpoint import load_model  # noqa: E402
 from radfoam_model.instance_cluster import (
     NOISE_ID,
     assign,

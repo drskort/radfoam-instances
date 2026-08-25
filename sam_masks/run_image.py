@@ -15,7 +15,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-from sam_masks.automask import AutomaskConfig
+from sam_masks.automask import AutomaskConfig, apply_tag_preset
 from sam_masks.backends import get_backend
 from sam_masks.frames import build_sequence
 from sam_masks.paths import (
@@ -143,6 +143,11 @@ def main():
     args = parser.parse_args()
 
     config = AutomaskConfig()
+    # A known tag implies its thresholds; explicit flags below still override.
+    applied = apply_tag_preset(config, args.tag)
+    if applied:
+        print(f"tag '{args.tag}' preset: "
+              + ", ".join(f"{k}={getattr(config, k)}" for k in applied), flush=True)
     if args.points_per_side is not None:
         config.points_per_side = args.points_per_side
     if args.top_k is not None:

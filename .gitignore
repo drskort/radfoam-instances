@@ -27,7 +27,7 @@ __pycache__
 # MasQCLIP weights: 1.5 GB each, from the MasQCLIP release, not ours to ship.
 ckpts/
 
-# foamviz scene exports and PLYs are build artefacts of a checkpoint.
+# PLY scene exports are build artefacts of a checkpoint.
 *.ply
 
 # Compiled extension: built by `pip install -e .`, not source.

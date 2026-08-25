@@ -24,7 +24,8 @@
 # run_video skips an arm that already completed (propagation is one stateful
 # pass and cannot resume mid-stream). Pass --force via EXTRA_ARGS to redo work.
 #
-# Rough per-arm cost at the 16x16 grid, measured on garden:
+# Rough per-arm cost at the default 16x16 grid, measured on garden (t70 uses
+# 32x32, so roughly 4x the point budget):
 #   sam21 image  ~2 s/frame     sam21 video  ~1.4 s/frame
 #   sam31 image  ~35 s/frame    sam31 video  ~15 s/frame
 # So room/sam31/image (311 frames) is the long pole at roughly 3 hours.
@@ -63,6 +64,9 @@ echo "=== $(hostname): $SCENE / $MODEL / $MODE ==="
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 git -C "$REPO" rev-parse --short HEAD
 
-python -m "sam_masks.run_${MODE}" --scene "$SCENE" --model "$MODEL" ${EXTRA_ARGS:-}
+# TAG defaults to t70, the arm radfoam_model/instance_masks.py expects; the
+# tag also selects its threshold preset (see sam_masks/automask.py).
+python -m "sam_masks.run_${MODE}" --scene "$SCENE" --model "$MODEL" \
+    --tag "${TAG:-t70}" ${EXTRA_ARGS:-}
 
 echo "=== done: $SCENE / $MODEL / $MODE ==="
