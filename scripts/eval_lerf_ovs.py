@@ -54,7 +54,7 @@ from radfoam_model.instance_language import (  # noqa: E402
     square_pad_resize,
     surface_cells,
 )
-from extract_instance_language import load_model  # noqa: E402
+from radfoam_model.checkpoint import load_model  # noqa: E402
 
 from radfoam_model.data_paths import LERF_OVS_ROOT
 
@@ -130,7 +130,7 @@ def main():
     args = parser.parse_args()
 
     device = torch.device("cuda")
-    model, dataset_args = load_model(args.checkpoint, device, args.model)
+    model, _, dataset_args = load_model(args.checkpoint, device, args.model)
     scene = dataset_args.scene
 
 
@@ -190,7 +190,7 @@ def main():
                                                     model.att_feat)
         if clustering is None or labels is None:
             raise SystemExit("no cached clustering with per-cell labels; run "
-                             "`foamviz.py cluster --method full` first")
+                             "`cluster_cells.py --method full` first")
         print(f"{clustering.n_clusters} instances", flush=True)
     labels = labels.to(device)
 

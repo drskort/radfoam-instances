@@ -33,6 +33,16 @@ to tens of thousands of nodes.
         output/teatime_var05_geo
 """
 
+
+import sys
+from pathlib import Path
+
+# Run directly from a clone: this lives in scripts/ but imports configs/,
+# radfoam_model/ and data_loader/ from the repo root, which pip does not
+# install (setup.cfg packages only src/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import argparse
 import json
 from pathlib import Path
@@ -55,21 +65,6 @@ SH_C0 = 0.28209479177387814
 HIGHLIGHT = (1.0, 0.18, 0.18)
 
 
-def load_model(checkpoint, device, model_file="model.pt"):
-    import configargparse
-
-    config = Path(checkpoint) / "config.yaml"
-    parser = configargparse.ArgParser(default_config_files=[str(config)])
-    parser.add_argument("-c", "--config", is_config_file=True)
-    model_params = ModelParams(parser)  # noqa: F405
-    PipelineParams(parser)  # noqa: F405
-    OptimizationParams(parser)  # noqa: F405
-    dataset_params = DatasetParams(parser)  # noqa: F405
-    args = parser.parse_args(["-c", str(config)])
-
-    model = RadFoamScene(args=model_params.extract(args), device=device)
-    model.load_pt(str(Path(checkpoint) / model_file))
-    return model, args, dataset_params.extract(args)
 
 
 def one_ring(mask, edges):

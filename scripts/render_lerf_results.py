@@ -14,6 +14,16 @@ scores. Two outputs per scene:
     MODEL=model_020000.pt sbatch scripts/render_lerf_slurm.sh output/ramen_inst_geo
 """
 
+
+import sys
+from pathlib import Path
+
+# Run directly from a clone: this lives in scripts/ but imports configs/,
+# radfoam_model/ and data_loader/ from the repo root, which pip does not
+# install (setup.cfg packages only src/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import argparse
 from pathlib import Path
 
@@ -32,7 +42,8 @@ from eval_lerf_mask import (  # noqa: E402
     load_ground_truth,
     predict_masks,
 )
-from extract_instance_language import DEFAULT_VLM, load_model  # noqa: E402
+from extract_instance_language import DEFAULT_VLM  # noqa: E402
+from radfoam_model.checkpoint import load_model  # noqa: E402
 
 OVERLAY_ALPHA = 0.55
 CELL_WIDTH = 420
@@ -83,7 +94,7 @@ def main():
     args = parser.parse_args()
 
     device = torch.device("cuda")
-    model, dataset_args = load_model(args.checkpoint, device, args.model)
+    model, _, dataset_args = load_model(args.checkpoint, device, args.model)
     scene_dir = Path(dataset_args.data_path) / dataset_args.scene
     truth = load_ground_truth(scene_dir)
 

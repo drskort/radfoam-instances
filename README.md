@@ -206,7 +206,7 @@ Florence-2 captioning variant, tuned against failures on these same scenes, and
 is **not** used for any reported number.
 
 The LERF harnesses read a cached clustering; produce it once with
-`python scripts/foamviz.py cluster --checkpoint output/<run> --method full`.
+`python scripts/cluster_cells.py --checkpoint output/<run> --method full`.
 `scripts/eval_scannetpp.py` refits instead, so `--clustering` controls it directly.
 
 `eval_lerf_grounded.py` pulls `IDEA-Research/grounding-dino-base` and
@@ -266,7 +266,8 @@ Regenerate the scene list with
 | `radfoam_model/data_paths.py` | dataset root resolution (env var, then `data/`) |
 | `scripts/eval_*.py` | LERF-Mask, LERF-OVS, ScanNet++ harnesses |
 | `scripts/eval_lerf_grounded.py` | OpenSplat3D's LERF-Mask protocol (GroundingDINO + SAM) |
-| `scripts/summarize_results.py` | rebuilds the ScanNet++ tables from `results/` |
+| `scripts/cluster_cells.py` | fits and caches the per-cell clustering every consumer reads |
+| `scripts/summarize_results.py` | rebuilds the reported tables from `results/` |
 | `results/scannetpp/`, `results/lerf_mask/` | raw eval output backing the reported numbers |
 
 ## Implementation notes

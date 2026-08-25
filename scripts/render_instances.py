@@ -17,6 +17,16 @@ does -- instances live in the field, and the 2D views are projections of them.
             --checkpoint output/garden_inst_nogeo
 """
 
+
+import sys
+from pathlib import Path
+
+# Run directly from a clone: this lives in scripts/ but imports configs/,
+# radfoam_model/ and data_loader/ from the repo root, which pip does not
+# install (setup.cfg packages only src/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import argparse
 import json
 from pathlib import Path
@@ -39,21 +49,6 @@ from radfoam_model.instance_cluster import (  # noqa: E402
 NOISE_COLOUR = np.array([90, 90, 90], dtype=np.uint8)
 
 
-def load_model(checkpoint, device, model_file="model.pt"):
-    import configargparse
-
-    config = Path(checkpoint) / "config.yaml"
-    parser = configargparse.ArgParser(default_config_files=[str(config)])
-    parser.add_argument("-c", "--config", is_config_file=True)
-    model_params = ModelParams(parser)  # noqa: F405
-    PipelineParams(parser)  # noqa: F405
-    OptimizationParams(parser)  # noqa: F405
-    dataset_params = DatasetParams(parser)  # noqa: F405
-    args = parser.parse_args(["-c", str(config)])
-
-    model = RadFoamScene(args=model_params.extract(args), device=device)
-    model.load_pt(str(Path(checkpoint) / model_file))
-    return model, args, dataset_params.extract(args)
 
 
 def feature_to_cluster_rgb(feature_map, clustering):

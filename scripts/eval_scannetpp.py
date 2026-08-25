@@ -37,7 +37,7 @@ from radfoam_model.scannetpp_eval import (
     predictions_from_labels,
 )
 
-from extract_instance_language import load_model  # noqa: E402
+from radfoam_model.checkpoint import load_model  # noqa: E402
 
 
 def main():
@@ -90,7 +90,7 @@ def main():
     args = parser.parse_args()
 
     device = torch.device("cuda")
-    model, dataset_args = load_model(args.checkpoint, device, args.model)
+    model, _, dataset_args = load_model(args.checkpoint, device, args.model)
     scene = dataset_args.scene
 
     if args.clustering == "hdbscan":
@@ -152,7 +152,7 @@ def main():
         clustering, labels = load_cached_clustering(args.checkpoint,
                                                     model.att_feat)
         if clustering is None or labels is None:
-            raise SystemExit("no cached clustering; run `foamviz.py cluster "
+            raise SystemExit("no cached clustering; run `cluster_cells.py "
                              "--method full` on this checkpoint first")
     if args.fill_noise:
         before = (labels == NOISE_ID).float().mean()

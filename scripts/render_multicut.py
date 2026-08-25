@@ -7,6 +7,16 @@ how the clusters were formed, not in how they are turned into pixels.
     MODEL=model_020000.pt sbatch scripts/render_multicut_slurm.sh output/ramen_inst_geo
 """
 
+
+import sys
+from pathlib import Path
+
+# Run directly from a clone: this lives in scripts/ but imports configs/,
+# radfoam_model/ and data_loader/ from the repo root, which pip does not
+# install (setup.cfg packages only src/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import argparse
 from pathlib import Path
 
@@ -24,7 +34,7 @@ from radfoam_model.instance_graph import (
 )
 
 from eval_lerf_grounded import render_argmax_labels  # noqa: E402
-from extract_instance_language import load_model  # noqa: E402
+from radfoam_model.checkpoint import load_model  # noqa: E402
 
 NOISE_COLOUR = np.array([70, 70, 70], dtype=np.uint8)
 ALPHA = 0.6
@@ -71,7 +81,7 @@ def main():
     args = parser.parse_args()
 
     device = torch.device("cuda")
-    model, dataset_args = load_model(args.checkpoint, device, args.model)
+    model, _, dataset_args = load_model(args.checkpoint, device, args.model)
     data = DataHandler(dataset_args, rays_per_batch=0, device=device)
     data.reload(split=args.split, downsample=min(dataset_args.downsample))
     height, width = data.img_wh[1], data.img_wh[0]

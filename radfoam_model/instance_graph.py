@@ -39,6 +39,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
+# One definition, so a cluster id keeps the same colour in the viewer, the
+# renders and the graph partitions.
+from radfoam_model.instance_cluster import _stable_palette
+
 DEFAULT_MIN_SIZE = 64
 NOISE_ID = -1
 
@@ -181,15 +185,6 @@ def felzenszwalb(features, edges, k=0.02, min_size=DEFAULT_MIN_SIZE):
     return _relabel(parent, min_size, n_points, features.device)
 
 
-def _stable_palette(count):
-    import cv2
-
-    count = max(count, 1)
-    hues = (np.arange(count) * 0.61803398875) % 1.0
-    hsv = np.stack(
-        [hues * 179, np.full(count, 230.0), np.full(count, 240.0)], axis=1
-    ).astype(np.uint8)[None]
-    return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)[0]
 
 
 def fit_graph_clusters(features, adjacency, offsets, method="felzenszwalb",

@@ -14,6 +14,16 @@ no container bias because it never has to decide where anything is.
     MODEL=model_020000.pt sbatch scripts/vlm_ground_slurm.sh output/ramen_var05_geo
 """
 
+
+import sys
+from pathlib import Path
+
+# Run directly from a clone: this lives in scripts/ but imports configs/,
+# radfoam_model/ and data_loader/ from the repo root, which pip does not
+# install (setup.cfg packages only src/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import argparse
 import json
 from pathlib import Path
@@ -28,7 +38,7 @@ from radfoam_model.instance_cluster import NOISE_ID, load_cached_clustering
 
 from eval_lerf_grounded import render_argmax_labels  # noqa: E402
 from eval_lerf_mask import boundary_iou, iou, load_ground_truth  # noqa: E402
-from extract_instance_language import load_model  # noqa: E402
+from radfoam_model.checkpoint import load_model  # noqa: E402
 
 VLM = "microsoft/Florence-2-large"
 TEXT = "sentence-transformers/all-MiniLM-L6-v2"
@@ -154,14 +164,14 @@ def main():
     args = parser.parse_args()
 
     device = torch.device("cuda")
-    model, dataset_args = load_model(args.checkpoint, device, args.model)
+    model, _, dataset_args = load_model(args.checkpoint, device, args.model)
     scene_dir = Path(dataset_args.data_path) / dataset_args.scene
     truth = load_ground_truth(scene_dir)
 
     clustering, labels = load_cached_clustering(args.checkpoint, model.att_feat)
     if clustering is None or labels is None:
         raise SystemExit("no cached clustering with per-cell labels; run "
-                         "`foamviz.py cluster --method full` first")
+                         "`cluster_cells.py --method full` first")
     print(f"{clustering.n_clusters} instances", flush=True)
 
     # Captions come from TRAINING views; the graded views stay untouched.

@@ -22,6 +22,16 @@ Then query it:
         --checkpoint output/garden_inst_nogeo --query "a wooden table" "a plant"
 """
 
+
+import sys
+from pathlib import Path
+
+# Run directly from a clone: this lives in scripts/ but imports configs/,
+# radfoam_model/ and data_loader/ from the repo root, which pip does not
+# install (setup.cfg packages only src/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import argparse
 from pathlib import Path
 
@@ -48,21 +58,6 @@ MIN_INSTANCE_PIXELS = 64
 DEFAULT_VLM = "google/siglip2-base-patch16-384"
 
 
-def load_model(checkpoint, device, model_file="model.pt"):
-    import configargparse
-
-    config = Path(checkpoint) / "config.yaml"
-    parser = configargparse.ArgParser(default_config_files=[str(config)])
-    parser.add_argument("-c", "--config", is_config_file=True)
-    model_params = ModelParams(parser)          # noqa: F405
-    PipelineParams(parser)                      # noqa: F405
-    OptimizationParams(parser)                  # noqa: F405
-    dataset_params = DatasetParams(parser)      # noqa: F405
-    args = parser.parse_args(["-c", str(config)])
-
-    model = RadFoamScene(args=model_params.extract(args), device=device)
-    model.load_pt(str(Path(checkpoint) / model_file))
-    return model, dataset_params.extract(args)
 
 
 def crop_box(mask, expansion, shape):
@@ -237,13 +232,13 @@ def main():
         dataset_args = None
         out_dir = None
         if args.visualise:
-            _, dataset_args = load_model(args.checkpoint, device, args.model)
+            _, _, dataset_args = load_model(args.checkpoint, device, args.model)
             out_dir = Path(args.checkpoint) / "language_matches"
         run_query(torch.load(store_path), args.query, args.vlm, device,
                   visualise=out_dir, dataset_args=dataset_args)
         return
 
-    model, dataset_args = load_model(args.checkpoint, device, args.model)
+    model, _, dataset_args = load_model(args.checkpoint, device, args.model)
     if getattr(model, "feat_dim", 0) == 0:
         raise SystemExit("this checkpoint has no instance features")
 

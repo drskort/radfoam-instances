@@ -50,8 +50,8 @@ from extract_instance_language import (  # noqa: E402
     DEFAULT_VLM,
     collect_instance_views,
     encode_instances,
-    load_model,
 )
+from radfoam_model.checkpoint import load_model  # noqa: E402
 
 BOUNDARY_DILATION_RATIO = 0.02
 
@@ -146,7 +146,7 @@ def main():
     args = parser.parse_args()
 
     device = torch.device("cuda")
-    model, dataset_args = load_model(args.checkpoint, device, args.model)
+    model, _, dataset_args = load_model(args.checkpoint, device, args.model)
     if getattr(model, "feat_dim", 0) == 0:
         raise SystemExit("this checkpoint has no instance features")
 

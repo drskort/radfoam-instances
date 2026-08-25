@@ -54,7 +54,7 @@ from eval_lerf_mask import (  # noqa: E402
     load_ground_truth,
     predict_masks,
 )
-from extract_instance_language import load_model  # noqa: E402
+from radfoam_model.checkpoint import load_model  # noqa: E402
 
 BOX_THRESHOLD = 0.3
 TEXT_THRESHOLD = 0.45
@@ -349,7 +349,7 @@ def main():
     args = parser.parse_args()
 
     device = torch.device("cuda")
-    model, dataset_args = load_model(args.checkpoint, device, args.model)
+    model, _, dataset_args = load_model(args.checkpoint, device, args.model)
     scene_dir = Path(dataset_args.data_path) / dataset_args.scene
     truth = load_ground_truth(scene_dir)
 
@@ -371,7 +371,7 @@ def main():
             load_cached_clustering,
         )
 
-        # Prefer the clustering cached by `foamviz.py cluster`. Two fits of the
+        # Prefer the clustering cached by `cluster_cells.py`. Two fits of the
         # same checkpoint disagree on both the number of instances and their
         # ids, so an eval that refits is not comparable with the viewer export
         # or the language table built from the cache.
@@ -388,7 +388,7 @@ def main():
         if clustering is None:
             used_cache = False
             if not args.refit:
-                print("no usable cache; fitting (run `foamviz.py cluster "
+                print("no usable cache; fitting (run `cluster_cells.py "
                       "--checkpoint ... --method full` to avoid this)")
             labels, clustering = fit_clusters_full(
                 model.att_feat,

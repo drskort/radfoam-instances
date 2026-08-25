@@ -39,7 +39,7 @@ class Clustering:
 
 
 def load_cached_clustering(checkpoint, features, seed=0, verbose=True):
-    """The clustering cached by `scripts/foamviz.py cluster`, if it is valid.
+    """The clustering cached by `scripts/cluster_cells.py`, if it is valid.
 
     Returns (Clustering, labels_or_None) or (None, None). `labels` is per-cell
     and in the checkpoint's point order; it is present only for methods that
