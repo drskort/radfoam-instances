@@ -1,0 +1,68 @@
+{
+  "scene": "ramen",
+  "protocol": "opensplat3d-grounded",
+  "clustering": "hdbscan_full",
+  "tau": 0.15,
+  "decoder": "instances",
+  "density_weight": false,
+  "with_position": 0.0,
+  "with_color": 0.0,
+  "cache_requested": true,
+  "used_cache": true,
+  "min_cluster_size": 32,
+  "min_samples": 16,
+  "selection_epsilon": 0.0,
+  "selection_method": "eom",
+  "readout": "argmax",
+  "ioa_threshold": 0.7,
+  "miou": 0.6554390531911028,
+  "mbiou": 0.48622703709724835,
+  "miou_per_class": {
+    "chopsticks": 0.5440066172708513,
+    "egg": 0.8364886847459568,
+    "glass of water": 0.7649701317990759,
+    "pork belly": 0.8043562789753032,
+    "wavy noodles in bowl": 0.14086073337786073,
+    "yellow bowl": 0.8419518729775692
+  },
+  "mbiou_per_class": {
+    "chopsticks": 0.5440066172708513,
+    "egg": 0.6174219101732884,
+    "glass of water": 0.5304184825080461,
+    "pork belly": 0.43175914230074586,
+    "wavy noodles in bowl": 0.10725129161425757,
+    "yellow bowl": 0.6865047787163011
+  },
+  "selected_instances": {
+    "chopsticks": [
+      103
+    ],
+    "egg": [
+      67,
+      98
+    ],
+    "glass of water": [
+      57,
+      68,
+      85,
+      114
+    ],
+    "pork belly": [
+      94,
+      112,
+      113
+    ],
+    "wavy noodles in bowl": [
+      20,
+      31,
+      69,
+      104,
+      107,
+      108
+    ],
+    "yellow bowl": [
+      69,
+      108
+    ]
+  }
+}

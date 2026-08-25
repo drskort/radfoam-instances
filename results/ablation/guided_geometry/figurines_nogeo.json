@@ -1,0 +1,62 @@
+{
+  "scene": "figurines",
+  "protocol": "opensplat3d-grounded",
+  "clustering": "hdbscan_full",
+  "tau": 0.15,
+  "decoder": "instances",
+  "density_weight": false,
+  "with_position": 0.0,
+  "with_color": 0.0,
+  "cache_requested": true,
+  "used_cache": true,
+  "min_cluster_size": 32,
+  "min_samples": 16,
+  "selection_epsilon": 0.0,
+  "selection_method": "eom",
+  "readout": "argmax",
+  "ioa_threshold": 0.7,
+  "miou": 0.8999440676165499,
+  "mbiou": 0.8731885335241513,
+  "miou_per_class": {
+    "green apple": 0.935492063000781,
+    "green toy chair": 0.9062581558994245,
+    "old camera": 0.9009831227383047,
+    "porcelain hand": 0.8174814266801769,
+    "red apple": 0.9342264182163182,
+    "red toy chair": 0.8908399658871757,
+    "rubber duck with red hat": 0.914327320893668
+  },
+  "mbiou_per_class": {
+    "green apple": 0.9097669512263251,
+    "green toy chair": 0.8796004754865815,
+    "old camera": 0.817121820678739,
+    "porcelain hand": 0.813645205546508,
+    "red apple": 0.9016307203504389,
+    "red toy chair": 0.8777574236556929,
+    "rubber duck with red hat": 0.9127971377247746
+  },
+  "selected_instances": {
+    "green apple": [
+      154
+    ],
+    "green toy chair": [
+      163
+    ],
+    "old camera": [
+      169,
+      186
+    ],
+    "porcelain hand": [
+      189
+    ],
+    "red apple": [
+      110
+    ],
+    "red toy chair": [
+      146
+    ],
+    "rubber duck with red hat": [
+      36
+    ]
+  }
+}

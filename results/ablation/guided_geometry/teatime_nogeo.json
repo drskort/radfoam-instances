@@ -1,0 +1,87 @@
+{
+  "scene": "teatime",
+  "protocol": "opensplat3d-grounded",
+  "clustering": "hdbscan_full",
+  "tau": 0.15,
+  "decoder": "instances",
+  "density_weight": false,
+  "with_position": 0.0,
+  "with_color": 0.0,
+  "cache_requested": true,
+  "used_cache": true,
+  "min_cluster_size": 32,
+  "min_samples": 16,
+  "selection_epsilon": 0.0,
+  "selection_method": "eom",
+  "readout": "argmax",
+  "ioa_threshold": 0.7,
+  "miou": 0.7033191058381381,
+  "mbiou": 0.6268172626671861,
+  "miou_per_class": {
+    "apple": 0.820008691082545,
+    "bag of cookies": 0.8369543147208122,
+    "coffee mug": 0.8623481781376519,
+    "cookies on a plate": 0.20031666301822393,
+    "paper napkin": 0.8762001745708466,
+    "plate": 0.8511195468505639,
+    "sheep": 0.8064858174674594,
+    "spoon handle": 0.13186813186813187,
+    "stuffed bear": 0.9034058096558096,
+    "tea in a glass": 0.7444837310093363
+  },
+  "mbiou_per_class": {
+    "apple": 0.8088220551378447,
+    "bag of cookies": 0.8372943327239488,
+    "coffee mug": 0.8623481781376519,
+    "cookies on a plate": 0.2003465965141338,
+    "paper napkin": 0.8642711667151586,
+    "plate": 0.8511195468505639,
+    "sheep": 0.5032440940428153,
+    "spoon handle": 0.13186813186813187,
+    "stuffed bear": 0.5093355408828868,
+    "tea in a glass": 0.6995229837987254
+  },
+  "selected_instances": {
+    "apple": [
+      271
+    ],
+    "bag of cookies": [
+      308
+    ],
+    "coffee mug": [
+      304
+    ],
+    "cookies on a plate": [
+      294,
+      295,
+      314
+    ],
+    "paper napkin": [
+      307
+    ],
+    "plate": [
+      314
+    ],
+    "sheep": [
+      126,
+      204,
+      272,
+      276,
+      281,
+      296,
+      301,
+      302,
+      303
+    ],
+    "spoon handle": [
+      278
+    ],
+    "stuffed bear": [
+      292,
+      311
+    ],
+    "tea in a glass": [
+      288
+    ]
+  }
+}

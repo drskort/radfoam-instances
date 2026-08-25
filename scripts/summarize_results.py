@@ -77,6 +77,33 @@ def lerf_mask(root):
     print("  Gaussian Grouping 72.8/67.6   ILGS 80.5/76.0   OpenSplat3D 84.0/-")
 
 
+def ablation(root):
+    """Rebuild the guided-geometry ablation from both committed arms."""
+    arms = {}
+    for path in sorted(root.glob("*_*.json")):
+        scene, _, arm = path.stem.rpartition("_")
+        d = json.loads(path.read_text())
+        arms.setdefault(scene, {})[arm] = (100 * d["miou"], 100 * d["mbiou"])
+    paired = {s: v for s, v in arms.items() if {"geo", "nogeo"} <= set(v)}
+    if not paired:
+        return
+    order = {"figurines": 0, "ramen": 1, "teatime": 2}
+    scenes = sorted(paired, key=lambda s: order.get(s, 99))
+    print("\n=== ablation: instance gradients also shaping density ===")
+    print(f"  {'scene':<12}{'with':>8}{'without':>9}{'d mIoU':>9}{'d mBIoU':>10}")
+    for s in scenes:
+        g, n = paired[s]["geo"], paired[s]["nogeo"]
+        print(f"  {s:<12}{g[0]:>8.2f}{n[0]:>9.2f}{g[0]-n[0]:>+9.2f}"
+              f"{g[1]-n[1]:>+10.2f}")
+    dm = np.mean([paired[s]["geo"][0] - paired[s]["nogeo"][0] for s in scenes])
+    db = np.mean([paired[s]["geo"][1] - paired[s]["nogeo"][1] for s in scenes])
+    wins = sum(paired[s]["geo"][0] > paired[s]["nogeo"][0] for s in scenes)
+    print(f"  {'MEAN':<12}"
+          f"{np.mean([paired[s]['geo'][0] for s in scenes]):>8.2f}"
+          f"{np.mean([paired[s]['nogeo'][0] for s in scenes]):>9.2f}"
+          f"{dm:>+9.2f}{db:>+10.2f}   wins {wins}/{len(scenes)}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--results", type=Path, default=RESULTS)
@@ -139,6 +166,10 @@ def main():
     lerf = args.results.parent / "lerf_mask"
     if lerf.is_dir():
         lerf_mask(lerf)
+
+    abl = args.results.parent / "ablation" / "guided_geometry"
+    if abl.is_dir():
+        ablation(abl)
 
 
 if __name__ == "__main__":

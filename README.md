@@ -329,16 +329,35 @@ LERF, single seed:
 
 | change | effect |
 |---|---|
-| instance gradients also shaping density | +22.4 mIoU |
 | variance loss (weight 0.5) | +1.5 mIoU |
 | dropping SAM granularity level 1 | −7.6 mIoU |
 | occupancy prior (binarisation + TV) | +0.2 mIoU, −2.1 mBIoU |
 
-> Like LERF-OVS, **these are not backed by committed artifacts** — single seed,
-> and the checkpoints behind them were lost. An earlier version of this table
-> also quoted a −0.8 LERF-OVS delta for the variance loss; that is an order of
-> magnitude inside the repeat-to-repeat spread of that benchmark and has been
-> removed rather than defended.
+> **Not backed by committed artifacts** — single seed, and the checkpoints
+> behind them were lost. An earlier version of this table also quoted a −0.8
+> LERF-OVS delta for the variance loss; that is an order of magnitude inside
+> that benchmark's repeat-to-repeat spread and has been removed rather than
+> defended.
+
+**Instance gradients also shaping density** is the one ablation that has been
+re-run properly — both arms trained from scratch on all three LERF scenes and
+scored under the grounded protocol, committed under
+`results/ablation/guided_geometry/`:
+
+| scene | with | without | Δ mIoU | Δ mBIoU |
+|---|---|---|---|---|
+| figurines | 91.15 | 89.99 | +1.16 | +1.59 |
+| ramen | 75.74 | 65.54 | +10.20 | +20.06 |
+| teatime | 81.16 | 70.33 | +10.83 | +12.94 |
+| **mean** | **82.68** | **75.29** | **+7.39** | **+11.53** |
+
+Letting the instance gradient move sites and densities, rather than only the
+features, is worth **+7.4 mIoU** and wins on all three scenes — the largest
+effect measured here. An earlier single-seed run on one scene put it at +22.4;
+that figure does not survive a paired three-scene measurement and has been
+replaced rather than kept. Note figurines barely moves (+1.16) while ramen and
+teatime gain ~10: the term matters most where objects are not already separated
+by colour alone.
 
 The occupancy prior is kept as a negative result. It commits cells to solid or
 empty reliably (cells with α between 0.1 and 0.9 drop 4–11×), but most of the
