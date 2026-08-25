@@ -64,8 +64,9 @@ class DataHandler:
             split_dataset, "all_alphas", torch.ones_like(self.rgbs[..., 0:1])
         )
 
-        # Instance labels, aligned with self.rays. Absent masks are not an
-        # error -- training simply runs without the instance loss.
+        # Instance labels, aligned with self.rays. Absent masks abort the run
+        # when instance_weight > 0 (see below) -- training that silently skips
+        # the instance loss produces a feature field of noise.
         self.instance_labels = None
         if split == "train" and getattr(self.args, "instance_masks", True):
             from radfoam_model.instance_masks import (

@@ -27,8 +27,17 @@ mean over 8 scenes at 20k iterations):
 | OpenSplat3D + DBSCAN denoising | 24.5 | 41.7 | 57.1 |
 | this repo, HDBSCAN `min_cluster_size=512` | 17.7 | 42.3 | 65.6 |
 
-The baselines are on all 50 scenes of the validation split, this repo on the
-first 8, so no row here is like-for-like. Per-scene AP spans 6.9 to 29.8, giving
+Two things make this table not like-for-like, and both cut against it. The
+baselines are on all 50 scenes of the validation split, this repo on the first
+8. And AP here is computed by `radfoam_model/scannetpp_eval.py`, a
+reimplementation of ScanNet++'s scorer written for this project, while the
+baseline rows come from the official evaluator. The reimplementation follows the
+published one closely — the same nine IoU thresholds, the same 100-vertex
+minimum, the same void handling — but it has not been cross-checked against the
+official scorer on a single scene, so a systematic offset cannot be ruled out.
+One known divergence: with `--score uniform` every prediction carries confidence
+1.0, so the precision-recall ranking is decided by tie order rather than by
+score. Per-scene AP spans 6.9 to 29.8, giving
 a standard error of ±2.9 on the mean, and ±4.5 on AP50 and AP25 — wide enough
 that the 0.6 AP50 gap over OpenSplat3D's denoised result is no more defensible
 than the AP gap in the other direction. None of the three columns separates
@@ -57,8 +66,9 @@ the fill the same model scores 10.84 AP — see [Clustering study](#clustering-s
 Per scene: figurines 91.15 / 88.91, ramen 75.74 / 68.68, teatime 81.16 / 75.62,
 committed under `results/lerf_mask/`. An earlier run of the same configuration
 scored 83.13 / 77.87; its checkpoint was lost, so the numbers above are from a
-retrain and are the ones backed by artifacts. The 0.45 mIoU difference between
-the two is within the seed-to-seed variation measured on this benchmark.
+retrain and are the ones backed by artifacts. The two differ by 0.45 mIoU. No
+seed-to-seed variance was measured on this benchmark, so that gap is reported
+rather than explained away.
 
 **LERF-OVS** (4 scenes, flat mIoU): 66.1 with SigLIP-so400m, 63.3 with MasQCLIP,
 against 59.7 for OpenSplat3D. This benchmark's annotated frames are ordinary
@@ -97,8 +107,10 @@ pip install git+https://github.com/openai/CLIP.git   # OpenAI CLIP, not on PyPI
 
 and put the MasQCLIP weights at `ckpts/MasQCLIP/base_novel.pth`. They come from
 the [MasQCLIP release](https://github.com/mlpc-ucsd/MasQCLIP) and are not
-redistributed here. The default `siglip` encoder needs neither — it pulls
-`google/siglip-so400m-patch14-384` through `transformers` on first use.
+redistributed here. `eval_lerf_ovs.py` defaults to `--encoder masqclip`,
+matching OpenSplat3D; pass `--encoder siglip` to avoid the checkpoint entirely,
+which pulls `google/siglip-so400m-patch14-384` through `transformers` instead
+and is the setting behind the higher of the two LERF-OVS numbers.
 
 ## Datasets
 
@@ -201,7 +213,10 @@ The LERF harnesses read a cached clustering; produce it once with
 `facebook/sam-vit-huge` from the Hub on first use. Compute nodes are often
 offline, so warm the cache from a machine with network access before submitting.
 
-**4. Check the tables.** Every ScanNet++ and LERF-Mask number in this README is committed as the raw
+**4. Check the tables.** The eval scripts write their JSON next to the
+checkpoint in `output/<run>/`; the copies under `results/` are those same files
+renamed to `<benchmark>/<scene>.json`, byte-identical apart from the path. Every
+ScanNet++, LERF-Mask and ablation number in this README is committed as the raw
 output of the command that produced it, under `results/scannetpp/<scene>/`
 (80 runs: 10 configurations × 8 scenes). Regenerate the tables from those files
 rather than trusting the markdown:
@@ -214,9 +229,9 @@ python scripts/summarize_results.py
 
 The first 8 scenes of the official `nvs_sem_val.txt` split, in file order —
 a prefix rather than a sample, so the choice involves no selection. Frames are
-capped at 300 with a uniform stride, matching `num_frames: 300` in OpenSplat3D's
-`num_frames: 300` in OpenSplat3D's `configs/scannetpp.yaml`, implemented
-here as `MAX_FRAMES` in `data_loader/scannetpp.py`. DSLR captures only. Per-scene AP is
+capped at 300 with a uniform stride, matching `num_frames: 300` in
+OpenSplat3D's `configs/scannetpp.yaml`, implemented here as `MAX_FRAMES` in
+`data_loader/scannetpp.py`. DSLR captures only. Per-scene AP is
 for the reported configuration.
 
 | scene | frames used | GT scored | AP | AP50 | AP25 |
@@ -342,7 +357,8 @@ LERF, single seed:
 **Instance gradients also shaping density** is the one ablation that has been
 re-run properly — both arms trained from scratch on all three LERF scenes and
 scored under the grounded protocol, committed under
-`results/ablation/guided_geometry/`:
+`results/ablation/guided_geometry/`. The with-arm files are the same runs as the
+LERF-Mask row above, not separate evaluations:
 
 | scene | with | without | Δ mIoU | Δ mBIoU |
 |---|---|---|---|---|
@@ -356,8 +372,11 @@ features, is worth **+7.4 mIoU** and wins on all three scenes — the largest
 effect measured here. An earlier single-seed run on one scene put it at +22.4;
 that figure does not survive a paired three-scene measurement and has been
 replaced rather than kept. Note figurines barely moves (+1.16) while ramen and
-teatime gain ~10: the term matters most where objects are not already separated
-by colour alone.
+teatime gain ~10. Two readings fit: figurines contains colour-labelled
+duplicates (green/red apple, green/red toy chair) that the term should help
+disambiguate, but it also starts at 89.99 without the term, so a ceiling effect
+explains the small delta at least as well. The data here does not separate
+them.
 
 The occupancy prior is kept as a negative result. It commits cells to solid or
 empty reliably (cells with α between 0.1 and 0.9 drop 4–11×), but most of the

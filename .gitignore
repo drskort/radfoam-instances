@@ -12,7 +12,8 @@
 *.egg-info
 __pycache__
 /*nsight
-*ipynb
+*.ipynb
+.ipynb_checkpoints/
 
 # Slurm logs -- every job in this repo writes one to the root.
 *.log
@@ -31,3 +32,7 @@ ckpts/
 
 # Compiled extension: built by `pip install -e .`, not source.
 /src/radfoam/
+
+# Checkpoints: written to output/, never versioned.
+*.pt
+*.pth

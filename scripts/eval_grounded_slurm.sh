@@ -21,6 +21,10 @@ export HF_HUB_OFFLINE=1
 NVLIBS=$(find "$REPO/.venv/lib/python3.10/site-packages/nvidia" -name lib -type d 2>/dev/null | tr "\n" ":")
 export LD_LIBRARY_PATH="${NVLIBS}${LD_LIBRARY_PATH:-}"
 echo "=== $(hostname): grounded LERF-Mask eval of $CHECKPOINT ($MODEL) ==="
+# hdbscan_full reads the per-cell clustering cached by foamviz.py and reads out
+# by argmax. The script's own default (hdbscan) refits on a 60k subsample and
+# reads out by centroid, which scores ~4 mIoU lower -- override deliberately.
 python scripts/eval_lerf_grounded.py \
-    --checkpoint "$CHECKPOINT" --model "$MODEL" ${GROUNDED_ARGS:-}
+    --checkpoint "$CHECKPOINT" --model "$MODEL" \
+    --clustering "${CLUSTERING:-hdbscan_full}" ${GROUNDED_ARGS:-}
 echo "=== done ==="

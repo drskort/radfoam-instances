@@ -21,6 +21,16 @@ overlapping primitives is expected to lose to a hard partition of space.
             --checkpoint output/figurines_inst_geo --model model.pt
 """
 
+
+import sys
+from pathlib import Path
+
+# Run directly from a clone: the eval scripts live in scripts/ but import
+# configs/, radfoam_model/ and data_loader/ from the repo root, which pip
+# does not install (setup.cfg packages only src/). The Slurm wrappers set
+# PYTHONPATH; this makes the plain commands in the README work too.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import argparse
 import json
 from pathlib import Path
