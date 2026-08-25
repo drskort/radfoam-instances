@@ -19,13 +19,14 @@ a different object from instance 7 in the language results.
 Grounding reuses scripts/eval_lerf_grounded.py unmodified, so the viewer selects
 instances by exactly the protocol the published numbers were computed with.
 
-    # once, after exporting a PLY with features and running convert-ply.mjs --feat
-    .venv/bin/python scripts/foamviz.py export \
-        --scene ~/foamviz/public/garden --checkpoint output/garden_inst_geo
+    # the subcommand used in this repo: cache a per-cell clustering that every
+    # downstream consumer then reads, so ids agree between eval and viewer
+    python scripts/foamviz.py cluster --checkpoint output/<run> --method full
 
-    # then, alongside the vite dev server
-    .venv/bin/python scripts/foamviz.py serve \
-        --scene ~/foamviz/public/garden --checkpoint output/garden_inst_geo
+    # export/serve target a separate WebGL viewer that is not part of this repo;
+    # --scene points at that viewer's asset directory
+    python scripts/foamviz.py export --scene <viewer>/public/<name> \
+        --checkpoint output/<run>
 """
 
 import argparse
