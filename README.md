@@ -16,6 +16,62 @@ tessellation instead of Gaussian splats.
 
 ## Results
 
+Three findings, in the order I would defend them.
+
+**1. Letting the instance gradient shape geometry is what makes this work.**
+Cells are not fixed — the same gradient that trains the per-cell features can
+move sites and densities too. Turning that off costs **7.4 mIoU** on all three
+LERF scenes. This is the only measurement here with both arms retrained from
+scratch, paired per scene, and committed as artifacts.
+
+Both arms trained from scratch, scored under the grounded protocol, committed
+under `results/ablation/guided_geometry/`. The with-arm files are the same runs
+as the LERF-Mask table below, not separate evaluations:
+
+| scene | with | without | Δ mIoU | Δ mBIoU |
+|---|---|---|---|---|
+| figurines | 91.15 | 89.99 | +1.16 | +1.59 |
+| ramen | 75.74 | 65.54 | +10.20 | +20.06 |
+| teatime | 81.16 | 70.33 | +10.83 | +12.94 |
+| **mean** | **82.68** | **75.29** | **+7.39** | **+11.53** |
+
+An earlier single-seed run on one scene put this at +22.4; that figure does not
+survive a paired three-scene measurement and has been replaced rather than kept.
+Note figurines barely moves (+1.16) while ramen and teatime gain ~10. Two
+readings fit: figurines contains colour-labelled duplicates (green/red apple,
+green/red toy chair) that the term should help disambiguate, but it also starts
+at 89.99 without the term, so a ceiling effect explains the small delta at least
+as well. The data here does not separate them.
+
+**2. Space-tiling cells find and separate objects well, and localise them
+loosely.** On ScanNet++, AP25/AP is 3.7 here against 2.9 for OpenSplat3D and 2.3
+with their denoising: the ranking improves sharply as the IoU threshold loosens.
+That is what cells with hard faces and no blending between them would predict,
+and it is the claim that benchmark can carry.
+
+**3. The graph cut — the part I most wanted to work — is a negative result.**
+Multicut on the Delaunay adjacency loses 1.66 AP to plain feature clustering and
+wins 2 of 8 scenes, despite being 16× cheaper and the only method that stands up
+without noise-filling. See [Clustering study](#clustering-study).
+
+### Benchmarks
+
+**LERF-Mask** (grounded protocol, mean over figurines / ramen / teatime):
+
+| method | mIoU | mBIoU |
+|---|---|---|
+| Gaussian Grouping | 72.8 | 67.6 |
+| ILGS (ICCV 2025) | 80.5 | 76.0 |
+| this repo | 82.7 | 77.7 |
+| OpenSplat3D | 84.0 | — |
+
+Per scene: figurines 91.15 / 88.91, ramen 75.74 / 68.68, teatime 81.16 / 75.62,
+committed under `results/lerf_mask/`. An earlier run of the same configuration
+scored 83.13 / 77.87; its checkpoint was lost, so the numbers above are from a
+retrain and are the ones backed by artifacts. The two differ by 0.45 mIoU. No
+seed-to-seed variance was measured on this benchmark, so that gap is reported
+rather than explained away.
+
 **ScanNet++ 3D instance segmentation** (class-agnostic, scored on mesh points,
 mean over 8 scenes at 20k iterations):
 
@@ -37,8 +93,8 @@ minimum, the same void handling — but it has not been cross-checked against th
 official scorer on a single scene, so a systematic offset cannot be ruled out.
 One known divergence: with `--score uniform` every prediction carries confidence
 1.0, so the precision-recall ranking is decided by tie order rather than by
-score. Per-scene AP spans 6.9 to 29.8, giving
-a standard error of ±2.9 on the mean, and ±4.5 on AP50 and AP25 — wide enough
+score. Per-scene AP spans 6.9 to 29.8, giving a standard error of ±2.9 on the
+mean, and ±4.5 on AP50 and AP25 — wide enough
 that the 0.6 AP50 gap over OpenSplat3D's denoised result is no more defensible
 than the AP gap in the other direction. None of the three columns separates
 these methods on 8 scenes.
@@ -53,22 +109,6 @@ The headline row uses `--fill-noise --split-connected`. Both are part of the
 method, not tuning: HDBSCAN abstains on ~70% of cells, which costs nothing on a
 2D readout that skips unlabelled pixels and is a guaranteed miss in 3D. Without
 the fill the same model scores 10.84 AP — see [Clustering study](#clustering-study).
-
-**LERF-Mask** (grounded protocol, mean over figurines / ramen / teatime):
-
-| method | mIoU | mBIoU |
-|---|---|---|
-| Gaussian Grouping | 72.8 | 67.6 |
-| ILGS (ICCV 2025) | 80.5 | 76.0 |
-| this repo | 82.7 | 77.7 |
-| OpenSplat3D | 84.0 | — |
-
-Per scene: figurines 91.15 / 88.91, ramen 75.74 / 68.68, teatime 81.16 / 75.62,
-committed under `results/lerf_mask/`. An earlier run of the same configuration
-scored 83.13 / 77.87; its checkpoint was lost, so the numbers above are from a
-retrain and are the ones backed by artifacts. The two differ by 0.45 mIoU. No
-seed-to-seed variance was measured on this benchmark, so that gap is reported
-rather than explained away.
 
 **LERF-OVS** (4 scenes, flat mIoU): 66.1 with SigLIP-so400m, 63.3 with MasQCLIP,
 against 59.7 for OpenSplat3D. This benchmark's annotated frames are ordinary
@@ -367,41 +407,18 @@ LERF, single seed:
 | dropping SAM granularity level 1 | −7.6 mIoU |
 | occupancy prior (binarisation + TV) | +0.2 mIoU, −2.1 mBIoU |
 
+The occupancy prior is kept as a negative result. It commits cells to solid or
+empty reliably (cells with α between 0.1 and 0.9 drop 4–11× — measured once,
+not committed), but most of the
+commitment is deletion, the total-variation term does not measurably contribute,
+and with sites still moving it makes incremental Delaunay updates progressively
+more expensive.
+
 > **Not backed by committed artifacts** — single seed, and the checkpoints
 > behind them were lost. An earlier version of this table also quoted a −0.8
 > LERF-OVS delta for the variance loss; that is an order of magnitude inside
 > that benchmark's repeat-to-repeat spread and has been removed rather than
 > defended.
-
-**Instance gradients also shaping density** is the one ablation that has been
-re-run properly — both arms trained from scratch on all three LERF scenes and
-scored under the grounded protocol, committed under
-`results/ablation/guided_geometry/`. The with-arm files are the same runs as the
-LERF-Mask row above, not separate evaluations:
-
-| scene | with | without | Δ mIoU | Δ mBIoU |
-|---|---|---|---|---|
-| figurines | 91.15 | 89.99 | +1.16 | +1.59 |
-| ramen | 75.74 | 65.54 | +10.20 | +20.06 |
-| teatime | 81.16 | 70.33 | +10.83 | +12.94 |
-| **mean** | **82.68** | **75.29** | **+7.39** | **+11.53** |
-
-Letting the instance gradient move sites and densities, rather than only the
-features, is worth **+7.4 mIoU** and wins on all three scenes — the largest
-effect measured here. An earlier single-seed run on one scene put it at +22.4;
-that figure does not survive a paired three-scene measurement and has been
-replaced rather than kept. Note figurines barely moves (+1.16) while ramen and
-teatime gain ~10. Two readings fit: figurines contains colour-labelled
-duplicates (green/red apple, green/red toy chair) that the term should help
-disambiguate, but it also starts at 89.99 without the term, so a ceiling effect
-explains the small delta at least as well. The data here does not separate
-them.
-
-The occupancy prior is kept as a negative result. It commits cells to solid or
-empty reliably (cells with α between 0.1 and 0.9 drop 4–11×), but most of the
-commitment is deletion, the total-variation term does not measurably contribute,
-and with sites still moving it makes incremental Delaunay updates progressively
-more expensive.
 
 ## Clustering study
 
