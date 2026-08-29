@@ -43,11 +43,17 @@ green/red toy chair) that the term should help disambiguate, but it also starts
 at 89.99 without the term, so a ceiling effect explains the small delta at least
 as well. The data here does not separate them.
 
-**2. Space-tiling cells find and separate objects well, and localise them
-loosely.** On ScanNet++, AP25/AP is 3.7 here against 2.9 for OpenSplat3D and 2.3
-with their denoising: the ranking improves sharply as the IoU threshold loosens.
-That is what cells with hard faces and no blending between them would predict,
-and it is the claim that benchmark can carry.
+**2. On ScanNet++ the foam is competitive with OpenSplat3D, and clearly ahead
+at looser IoU.** Scored by ScanNet++'s own evaluator: **23.9 / 49.4 / 67.6**
+against 19.2 / 37.3 / 56.2, and against 24.5 / 41.7 / 57.1 for their
+DBSCAN-denoised variant — level on AP with the denoised baseline, ahead by 7.7
+AP50 and 10.5 AP25. On 8 of their 50 scenes, so read it as competitive rather
+than better.
+
+An earlier version of this README argued from the AP25/AP *ratio* that objects
+were found but localised loosely. That was an artifact of this repo's own
+scorer understating AP; under the official evaluator the ratio is 2.8 against
+OpenSplat3D's 2.9 — no difference. The claim is withdrawn.
 
 **3. The graph cut — the part I most wanted to work — is a negative result.**
 Multicut on the Delaunay adjacency loses 1.66 AP to plain feature clustering and
@@ -81,29 +87,33 @@ mean over 8 scenes at 20k iterations):
 | Segment3D | 13.0 | 23.8 | 38.3 |
 | OpenSplat3D | 19.2 | 37.3 | 56.2 |
 | OpenSplat3D + DBSCAN denoising | 24.5 | 41.7 | 57.1 |
-| this repo, HDBSCAN `min_cluster_size=512` | 17.7 | 42.3 | 65.6 |
+| this repo, HDBSCAN `min_cluster_size=512` | **23.9** | **49.4** | **67.6** |
 
-Two things make this table not like-for-like, and both cut against it. The
-baselines are on all 50 scenes of the validation split, this repo on the first
-8. And AP here is computed by `radfoam_model/scannetpp_eval.py`, a
-reimplementation of ScanNet++'s scorer written for this project, while the
-baseline rows come from the official evaluator. The reimplementation follows the
-published one closely — the same nine IoU thresholds, the same 100-vertex
-minimum, the same void handling — but it has not been cross-checked against the
-official scorer on a single scene, so a systematic offset cannot be ruled out.
-One known divergence: with `--score uniform` every prediction carries confidence
-1.0, so the precision-recall ranking is decided by tie order rather than by
-score. Per-scene AP spans 6.9 to 29.8, giving a standard error of ±2.9 on the
-mean, and ±4.5 on AP50 and AP25 — wide enough
-that the 0.6 AP50 gap over OpenSplat3D's denoised result is no more defensible
-than the AP gap in the other direction. None of the three columns separates
-these methods on 8 scenes.
+**This row is scored by ScanNet++'s official evaluator**, the same one the
+baselines use — predictions exported with `scripts/export_scannetpp_official.py`
+and scored by `semantic/eval/eval_instance.py` from
+[scannetpp/scannetpp](https://github.com/scannetpp/scannetpp), per scene, with
+raw output in `results/scannetpp_official.json`.
 
-What the numbers do support is a *shape*. AP25/AP is 3.7 here, against 2.9 for
-OpenSplat3D and 2.3 with their denoising: the ranking improves sharply as the
-IoU threshold loosens. Objects are found and separated; their boundaries are
-loose. That is what cells with hard faces and no blending between them would
-predict, and it is the claim this benchmark can actually carry.
+That matters, because this repo also carries its own reimplementation of that
+scorer in `radfoam_model/scannetpp_eval.py`, and **the two disagree**. On
+identical predictions the reimplementation reports 17.65 / 42.29 / 65.56 against
+the official 23.9 / 49.4 / 67.6 — it understates AP by 6.2 on average, and the
+gap is not a constant offset but ranges from −0.5 to +10.7 across the eight
+scenes. The reimplementation is kept because every clustering experiment below
+was run through it and it is far cheaper to iterate on, but it is a development
+tool, not a scorer: **only the official numbers are comparable to published
+work.**
+
+The remaining non-comparability cuts against this row: the baselines are on all
+50 scenes of the validation split, this repo on the first 8, where per-scene AP
+under our own scorer spans 6.9 to 29.8 (sem ±2.9). Eight scenes cannot separate
+methods a few points apart.
+
+The margin is at looser IoU: +7.7 AP50 and +10.5 AP25 over the denoised
+baseline, against a dead heat on AP. Objects are found and separated at least as
+well as by the Gaussian-splat pipeline; tight-boundary agreement is where the
+two are level.
 
 The headline row uses `--fill-noise --split-connected`. Both are part of the
 method, not tuning: HDBSCAN abstains on ~70% of cells, which costs nothing on a
