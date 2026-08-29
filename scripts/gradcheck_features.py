@@ -28,7 +28,7 @@ RTOL = 5e-3
 # truncation error that dominates on cells where alpha saturates. Features are
 # linear, so EPS is exact for them; density needs a smaller step and a looser
 # tolerance. Verified against the upstream photometric density gradient, which
-# is equally noisy at the same primitives -- see scripts/diag_density_grad.py.
+# is equally noisy at the same primitives.
 DENSITY_EPS = 1e-3
 DENSITY_ATOL = 3e-4
 

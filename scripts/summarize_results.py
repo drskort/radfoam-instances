@@ -1,8 +1,11 @@
-"""Rebuild the README's ScanNet++ tables from the committed eval outputs.
+"""Rebuild the README's tables from the committed eval outputs.
 
-Every number in the README's ScanNet++ and clustering sections comes from
-results/scannetpp/<scene>/<config>.json, which eval_scannetpp.py writes. Run
-this to check the tables against the files rather than trusting the markdown.
+Two scorers appear here and they are never mixed. The README's ScanNet++
+headline is ScanNet++'s official evaluator (results/scannetpp_official.json);
+everything under "clustering study" is this repo's reimplementation
+(results/scannetpp/<scene>/<config>.json), which reads about 6 AP lower and is
+used only for comparisons internal to that study. Run this to check the tables
+against the files rather than trusting the markdown.
 
     python scripts/summarize_results.py
 """
@@ -104,10 +107,29 @@ def ablation(root):
           f"{dm:>+9.2f}{db:>+10.2f}   wins {wins}/{len(scenes)}")
 
 
+def official(path):
+    """The headline row: ScanNet++'s own evaluator on exported predictions."""
+    if not path.is_file():
+        return
+    d = json.loads(path.read_text())
+    scenes = sorted(d["per_scene"])
+    print("\n=== ScanNet++ headline: official evaluator ===")
+    print(f"  {'scene':<12}{'official AP':>12}{'ours':>8}{'delta':>8}")
+    for s in scenes:
+        o = d["per_scene"][s]["official"][0]; m = d["per_scene"][s]["ours"][0]
+        print(f"  {s[:10]:<12}{o:>12.1f}{m:>8.2f}{o - m:>+8.1f}")
+    mo, mm = d["mean_official"], d["mean_ours"]
+    print(f"  {'MEAN':<12}{mo[0]:>12.1f}{mm[0]:>8.2f}{mo[0] - mm[0]:>+8.1f}"
+          f"   AP50 {mo[1]:.1f}  AP25 {mo[2]:.1f}")
+    print("  OpenSplat3D 19.2 / 37.3 / 56.2; + DBSCAN 24.5 / 41.7 / 57.1")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--results", type=Path, default=RESULTS)
     args = ap.parse_args()
+
+    official(args.results.parent / "scannetpp_official.json")
 
     runs = load(args.results)
     if not runs:
@@ -117,7 +139,8 @@ def main():
     print(f"{len(scenes)} scenes, {len(complete)}/{len(runs)} configs complete "
           f"on all of them\n")
 
-    print("=== headline (fill-noise + connected-component split) ===")
+    print("=== clustering study: this repo's scorer, fill-noise + "
+          "connected-component split ===")
     table(runs, scenes, sorted(t for t in complete if "_fill_" in t))
 
     nofill = sorted(t for t in complete if "_fill_" not in t)
@@ -152,10 +175,6 @@ def main():
         print(f"  {k:<8}{a.mean():>8.2f}{a.std(ddof=1):>8.2f}"
               f"{a.std(ddof=1) / np.sqrt(len(scenes)):>8.2f}"
               f"{a.min():>7.1f}{a.max():>7.1f}")
-    ap = np.mean([100 * v[s]["AP"] for s in scenes])
-    ap25 = np.mean([100 * v[s]["AP25"] for s in scenes])
-    print(f"  AP25/AP ratio {ap25 / ap:.2f}   "
-          f"(OpenSplat3D 2.93, with their denoising 2.33)")
 
     print("\n=== ground truth actually scored ===")
     total = sum(v[s]["n_gt"] for s in scenes)

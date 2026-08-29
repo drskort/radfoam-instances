@@ -45,8 +45,8 @@ green/red toy chair) that the term should help disambiguate, but it also starts
 at 89.99 without the term, so a ceiling effect explains the small delta at least
 as well. The data here does not separate them.
 
-**2. On ScanNet++ the foam is competitive with OpenSplat3D, and clearly ahead
-at looser IoU.** Scored by ScanNet++'s own evaluator: **23.9 / 49.4 / 67.6**
+**2. On ScanNet++ the foam is competitive with OpenSplat3D, and ahead at
+looser IoU.** Scored by ScanNet++'s own evaluator: **23.9 / 49.4 / 67.6**
 against 19.2 / 37.3 / 56.2, and against 24.5 / 41.7 / 57.1 for their
 DBSCAN-denoised variant — level on AP with the denoised baseline, ahead by 7.7
 AP50 and 10.5 AP25. On 8 of their 50 scenes, so read it as competitive rather
@@ -89,13 +89,16 @@ mean over 8 scenes at 20k iterations):
 | Segment3D | 13.0 | 23.8 | 38.3 |
 | OpenSplat3D | 19.2 | 37.3 | 56.2 |
 | OpenSplat3D + DBSCAN denoising | 24.5 | 41.7 | 57.1 |
-| this repo, HDBSCAN `min_cluster_size=512` | **23.9** | **49.4** | **67.6** |
+| this repo, HDBSCAN `min_cluster_size=512` | 23.9 | **49.4** | **67.6** |
 
-**This row is scored by ScanNet++'s official evaluator**, the same one the
-baselines use — predictions exported with `scripts/export_scannetpp_official.py`
-and scored by `semantic/eval/eval_instance.py` from
-[scannetpp/scannetpp](https://github.com/scannetpp/scannetpp), per scene, with
-raw output in `results/scannetpp_official.json`.
+**This row is scored by ScanNet++'s official evaluator** — predictions
+exported with `scripts/export_scannetpp_official.py` and scored by
+`semantic/eval/eval_instance.py` from
+[scannetpp/scannetpp](https://github.com/scannetpp/scannetpp), per scene, raw
+output in `results/scannetpp_official.json`. Precisely: their scoring code, run
+on ground truth this repo exports from the same mesh annotations, with every
+instance collapsed onto one class so the class-agnostic number is not divided
+across 84 empty ones. That is their scorer, not their whole benchmark harness.
 
 That matters, because this repo also carries its own reimplementation of that
 scorer in `radfoam_model/scannetpp_eval.py`, and **the two disagree**. On
@@ -122,7 +125,8 @@ two are level.
 The headline row uses `--fill-noise --split-connected`. Both are part of the
 method, not tuning: HDBSCAN abstains on ~70% of cells, which costs nothing on a
 2D readout that skips unlabelled pixels and is a guaranteed miss in 3D. Without
-the fill the same model scores 10.84 AP — see [Clustering study](#clustering-study).
+the fill the same model scores 17.06 AP officially (10.84 under this repo's
+scorer) — see [Clustering study](#clustering-study).
 
 **LERF-OVS** (4 scenes, flat mIoU): 66.1 with SigLIP-so400m, 63.3 with MasQCLIP,
 against 59.7 for OpenSplat3D. This benchmark's annotated frames are ordinary
@@ -135,6 +139,201 @@ measurement. Single runs — see [Notes](#notes).
 > moved by several mIoU between repeats, so it is reported for completeness and
 > nothing here rests on it. ScanNet++ and LERF-Mask both have their raw eval
 > output committed.
+
+## Layout
+
+| path | |
+|---|---|
+| `radfoam_model/instance_loss.py` | multi-level contrastive loss over SAM masks |
+| `radfoam_model/instance_cluster.py` | HDBSCAN over all cells (cuML), cached with a feature fingerprint |
+| `radfoam_model/instance_graph.py` | multicut/GAEC, Felzenszwalb, threshold partitions on the Delaunay graph |
+| `radfoam_model/instance_language.py` | crop pipeline and SigLIP / MasQCLIP encoders |
+| `radfoam_model/occupancy_loss.py` | opacity binarisation + total-variation prior |
+| `radfoam_model/scannetpp_eval.py` | 3D instance AP against the scanned mesh |
+| `sam_masks/` | SAM 2.1 / 3.1 mask precompute |
+| `radfoam_model/data_paths.py` | dataset root resolution (env var, then `data/`) |
+| `scripts/eval_*.py` | LERF-Mask, LERF-OVS, ScanNet++ harnesses |
+| `scripts/eval_lerf_grounded.py` | OpenSplat3D's LERF-Mask protocol (GroundingDINO + SAM) |
+| `scripts/cluster_cells.py` | fits and caches the per-cell clustering every consumer reads |
+| `scripts/summarize_results.py` | rebuilds the reported tables from `results/` |
+| `scripts/make_figures.py` | redraws the figures above from `results/` |
+| `scripts/export_scannetpp_official.py` | predictions in ScanNet++'s official eval format |
+| `scripts/tie_order_sensitivity.py` | how much of AP is decided by arbitrary tie order |
+| `results/scannetpp/`, `results/lerf_mask/` | raw eval output backing the reported numbers |
+
+## Implementation notes
+
+### Variance loss and its backward pass
+
+The renderer already composites one quantity per ray. For a ray crossing cells
+$n = 1 \dots N$ with transmittance $T_n$ and opacity $\alpha_n$, write
+$w_n = T_n \alpha_n$. The instance features give
+
+$$F = \sum_n w_n f_n, \qquad V = \sum_n w_n f_n^2, \qquad s^2 = V - F^2$$
+
+so a second accumulator $V$ turns into a per-ray variance that penalises cells
+disagreeing along the same ray. $V$ is the raw second moment; the subtraction
+happens outside the kernel, which matters below.
+
+The paper writes the loss as $\lVert \operatorname{Var}(F) \rVert_2^2$ per
+ray. $\operatorname{Var}(F)$ is a $D$-vector whose $d$-th entry is the scalar
+variance of channel $d$, so there is no cross term and
+$\partial s^2_d / \partial f_{n,e} = 0$ for $e \neq d$. This implementation
+averages over channels rather than summing,
+
+$$\mathcal{L} = \frac{1}{RD} \sum_{r,d} \bigl(s^2_{r,d}\bigr)^2$$
+
+which differs from the paper by a constant $D$ that `variance_weight` absorbs.
+Channel-diagonality is what lets the *feature* gradient avoid any dot product
+across the feature axis; the density gradient under `instance_guided_geometry`
+necessarily sums over channels (`pipeline.cu:351`).
+
+Backward, two upstream gradients arrive per ray: $g_F$ from the contrastive
+term and $g_V = \partial \mathcal{L}/\partial V = 2 s^2 / (RD)$, the second
+because $\partial s^2/\partial V = 1$. The existing backward is a linear
+operator — given gradient $g$ on $\sum_n w_n x_n$ it returns $w_n g$ — so it is
+applied twice, once with $x_n = f_n$ and once with $x_n = f_n^2$. With the
+weights held fixed, $\partial F/\partial f_n = w_n$ and
+$\partial V/\partial f_n = 2 w_n f_n$, giving
+
+$$\frac{\partial \mathcal{L}}{\partial f_n} = w_n g_F + 2 w_n f_n g_V$$
+
+**The subtlety is who applies the coupling.** $F$ reaches the loss twice —
+directly, and through $s^2 = V - F^2$ with $\partial s^2/\partial F = -2F$.
+Exactly one of autograd and the kernel may account for it. Here
+`s² = V − F²` is a plain tensor op in the live graph, so the `grad_feature`
+handed to the kernel *already* contains the $-2F g_V$ path and the kernel
+applies no correction. OpenSplat3D wraps the same subtraction in
+`torch.no_grad()`, which is why they subtract it by hand instead. The two
+conventions are individually correct and cannot be mixed.
+
+An earlier version of this kernel did mix them, using
+$\hat g_F = g_F - 2F g_V$ under our convention. That double-counts the coupling
+and flips the gradient sign on exactly the cells that dominate a ray. It passed
+a finite-difference check at 0.1 feature scale — 1 failure in 32, dismissable as
+round-off — and failed 22 of 32 at unit scale. `scripts/gradcheck_variance.py`
+runs at unit scale for that reason.
+
+Composing the two terms when $g_F$ carries only the $s^2$ path gives
+$\partial s^2/\partial f_n = 2 w_n (f_n - F)$: each cell is pulled toward the
+ray's own mean feature, scaled by how much it actually contributed. A cell the
+ray barely touches barely moves.
+
+The kernel is in `src/tracing/pipeline.cu`.
+
+**Point assignment.** Mesh points are assigned to the nearest cell *that renders*
+(density > 1e-3), not the nearest cell. About a third of cells never render, and
+plain nearest-site lands in one of them 25% of the time.
+
+**Connected-component split.** Instances are split into spatially connected
+components using the Delaunay adjacency, which is the exact form of the DBSCAN
+step OpenSplat3D applies to Gaussian positions.
+
+## Ablations
+
+LERF, single seed:
+
+| change | effect |
+|---|---|
+| variance loss (weight 0.5) | +1.5 mIoU |
+| dropping SAM granularity level 1 | −7.6 mIoU |
+| occupancy prior (binarisation + TV) | +0.2 mIoU, −2.1 mBIoU |
+
+The occupancy prior is kept as a negative result. It commits cells to solid or
+empty reliably (cells with α between 0.1 and 0.9 drop 4–11× — measured once,
+not committed), but most of the
+commitment is deletion, the total-variation term does not measurably contribute,
+and with sites still moving it makes incremental Delaunay updates progressively
+more expensive.
+
+> **Not backed by committed artifacts** — single seed, and the checkpoints
+> behind them were lost. An earlier version of this table also quoted a −0.8
+> LERF-OVS delta for the variance loss; that is an order of magnitude inside
+> that benchmark's repeat-to-repeat spread and has been removed rather than
+> defended.
+
+## Clustering study
+
+Cells carry a feature *and* sit in a Delaunay graph, so the partition can be
+found by clustering the features or by cutting the graph. Both were swept over
+the same 8 scenes and the same checkpoints, so every comparison below is paired
+and per-scene difficulty cancels. Ten configurations were run; the eight with
+`--fill-noise` are below, the two without are further down.
+
+| clustering | AP | AP50 | AP25 |
+|---|---|---|---|
+| HDBSCAN `m=512` | **17.65** | 42.29 | 65.56 |
+| HDBSCAN `m=256` | 17.45 | 42.40 | 64.81 |
+| HDBSCAN `m=1024` | 17.42 | 42.44 | 63.33 |
+| multicut τ=0.3 `m=512` | 15.99 | 37.87 | 59.48 |
+| multicut + SAM votes `m=1024`, `w=1.0` | 15.98 | 36.71 | 59.68 |
+| multicut τ=0.3 `m=1024` | 15.47 | 36.48 | 58.70 |
+| multicut + SAM votes `m=1024`, `w=0.0` | 15.47 | 36.48 | 58.70 |
+| multicut τ=0.3 `m=2048` | 13.75 | 32.52 | 56.81 |
+
+The last two rows are identical on all 8 scenes and every field: `w=0.0` reduces
+exactly to plain multicut at the same `min_size`, which is the control the
++0.51 AP figure below is measured against.
+
+> **These are the reimplementation's numbers.** The four configurations the
+> conclusions below rest on were re-scored with ScanNet++'s official evaluator
+> (`results/scannetpp_official_clustering.json`), and every direction holds:
+>
+> | comparison | this repo's scorer | official scorer |
+> |---|---|---|
+> | multicut vs HDBSCAN, with fill | −1.66 AP, 2/8 | −1.47 AP, 2/8 |
+> | multicut vs HDBSCAN, no fill | +2.20 AP, 8/8 | +1.35 AP, 7/8 |
+> | fill-noise, on HDBSCAN | +6.82 AP, 8/8 | +6.81 AP, 8/8 |
+> | fill-noise, on multicut | +2.96 AP, 6/8 | +3.99 AP, 8/8 |
+>
+> Absolute values differ (the official scorer reads ~6 AP higher throughout),
+> but no ordering flips. The one weakening: multicut's no-fill win is 7 of 8
+> officially rather than unanimous.
+>
+> **The reimplementation is also order-sensitive.** With
+> uniform confidences the precision-recall ranking is decided by arbitrary
+> cluster order. Permuting it 100× per scene
+> (`scripts/tie_order_sensitivity.py`, raw output in `results/tie_order/`) moves
+> per-scene AP by sd **1.73**, mean range 8.06 — and AP50/AP25 by sd ~3.2, since
+> AP averages nine thresholds and damps the noise while a single threshold does
+> not. The emitted order flatters the 8-scene mean by **+0.84 AP, +1.74 AP50
+> and +3.50 AP25** — the bias is largest on exactly the two metrics the headline
+> leans on, so read those margins with it subtracted. Every comparison
+> below is deterministic and paired, but each measurement carries an arbitrary
+> offset of that size, so **differences under ~2 AP here are not meaningful.**
+
+<p align="center"><img src="assets/figures/tie_order.png" width="88%"></p>
+
+**Multicut loses by 1.66 AP, winning 2 of 8 scenes** — a gap inside the order
+noise above, so the honest reading is that multicut does not beat feature
+clustering, not that it is measurably worse. SAM co-occurrence votes are worth
++0.51 AP on 5 of 8, well inside it, so not a result. HDBSCAN's `min_cluster_size`
+spans 0.23 AP over 256/512/1024 against multicut's 2.24 — the reported setting is
+untuned, though 0.23 is itself below the noise floor.
+
+What survives the order noise is the no-fill result below — 8 of 8 under this
+scorer, 7 of 8 under the official one. A near-unanimous sign across eight scenes
+is evidence about direction, independent of magnitude.
+
+Two things cut the other way. Multicut is **16× cheaper** per scene as run
+here: 23 s against 368 s end-to-end on a 3090. These timings were measured
+once and are not committed as artifacts, unlike the AP figures above. Profiling puts essentially all of
+HDBSCAN's cost in the cuML fit itself — data transfer and centroids are under
+0.1 s — of which ~84 s is one-time initialisation, so a process fitting
+repeatedly would see ~12× rather than 16×. And with `--fill-noise`
+off, multicut **wins 8 of 8 scenes** by 2.20 AP (13.03 vs 10.84) and its clusters
+need no connected-component split at all, being connected by construction.
+
+The resolution is that filling abstaining cells by nearest centroid in feature
+space supplies the same spatial coherence the graph does, and more of it: it is
+worth +6.82 AP to HDBSCAN but only +2.96 to multicut. The graph encodes real structure; the
+post-hoc step just encodes more of it, for less.
+
+```bash
+python scripts/eval_scannetpp.py --checkpoint output/<run> --model model_020000.pt \
+    --clustering multicut --tau 0.3 --min-cluster-size 512 \
+    --fill-noise --split-connected      # drop --fill-noise for the no-fill arm
+```
 
 ## Install
 
@@ -159,9 +358,8 @@ Optional, only for the `masqclip` language encoder:
 pip install git+https://github.com/openai/CLIP.git   # OpenAI CLIP, not on PyPI
 ```
 
-and put the MasQCLIP weights at `ckpts/MasQCLIP/base_novel.pth`, resolved
-relative to the working directory (the Slurm wrapper sets `WORKSPACE_PATH` for
-this; running from the repo root does the same). They come from
+and put the MasQCLIP weights at `ckpts/MasQCLIP/base_novel.pth`, resolved relative
+to the working directory, so run from the repo root. They come from
 the [MasQCLIP release](https://github.com/mlpc-ucsd/MasQCLIP) and are not
 redistributed here. `eval_lerf_ovs.py` defaults to `--encoder masqclip`,
 matching OpenSplat3D; pass `--encoder siglip` to avoid the checkpoint entirely,
@@ -299,19 +497,24 @@ The first 8 scenes of the official `nvs_sem_val.txt` split, in file order —
 a prefix rather than a sample, so the choice involves no selection. Frames are
 capped at 300 with a uniform stride, matching `num_frames: 300` in
 OpenSplat3D's `configs/scannetpp.yaml`, implemented here as `MAX_FRAMES` in
-`data_loader/scannetpp.py`. DSLR captures only. Per-scene AP is
-for the reported configuration.
+`data_loader/scannetpp.py`. DSLR captures only.
 
-| scene | frames used | GT scored | AP | AP50 | AP25 |
-|---|---|---|---|---|---|
-| `7b6477cb95` | 300 | 48 | 15.0 | 42.2 | 67.3 |
-| `c50d2d1d42` | 300 | 39 | 22.7 | 59.9 | 82.7 |
-| `cc5237fd77` | 300 | 31 | 6.9 | 21.6 | 45.2 |
-| `acd95847c5` | 300 | 55 | 21.5 | 48.0 | 70.7 |
-| `fb5a96b1a2` | 300 | 56 | 9.4 | 38.5 | 73.8 |
-| `a24f64f7fb` | 300 | 18 | 29.8 | 49.9 | 64.7 |
-| `1ada7a0617` | 300 | 31 | 25.1 | 50.2 | 71.5 |
-| `5eb31827b7` | 151 | 33 | 10.7 | 28.0 | 48.7 |
+AP is given under both scorers, because they disagree and only the official
+column is comparable to published work. The official column is what the headline
+table averages to (23.9); the right-hand columns are this repo's scorer, which
+the clustering study below uses throughout.
+
+| scene | frames | GT scored | AP (official) | AP | AP50 | AP25 |
+|---|---|---|---|---|---|---|
+| `7b6477cb95` | 300 | 48 | 23.9 | 15.0 | 42.2 | 67.3 |
+| `c50d2d1d42` | 300 | 39 | 26.6 | 22.7 | 59.9 | 82.7 |
+| `cc5237fd77` | 300 | 31 | 13.5 | 6.9 | 21.6 | 45.2 |
+| `acd95847c5` | 300 | 55 | 30.7 | 21.5 | 48.0 | 70.7 |
+| `fb5a96b1a2` | 300 | 56 | 14.9 | 9.4 | 38.5 | 73.8 |
+| `a24f64f7fb` | 300 | 18 | 29.3 | 29.8 | 49.9 | 64.7 |
+| `1ada7a0617` | 300 | 31 | 30.7 | 25.1 | 50.2 | 71.5 |
+| `5eb31827b7` | 151 | 33 | 21.4 | 10.7 | 28.0 | 48.7 |
+| **mean** | | | **23.9** | **17.65** | **42.29** | **65.56** |
 
 The `frames used` column is a property of the loader (`MAX_FRAMES` capped
 against the frames on disk), not of the eval, so it is the one column here that
@@ -323,200 +526,6 @@ ScanNet++'s own scorer applies, and those are what the AP columns are computed
 against. The counts above are the `n_gt` field of the committed JSONs.
 Regenerate the scene list with
 `python -c "from data_loader.scannetpp import val_scenes; print(val_scenes()[:8])"`.
-
-## Layout
-
-| path | |
-|---|---|
-| `radfoam_model/instance_loss.py` | multi-level contrastive loss over SAM masks |
-| `radfoam_model/instance_cluster.py` | HDBSCAN over all cells (cuML), cached with a feature fingerprint |
-| `radfoam_model/instance_graph.py` | multicut/GAEC, Felzenszwalb, threshold partitions on the Delaunay graph |
-| `radfoam_model/instance_language.py` | crop pipeline and SigLIP / MasQCLIP encoders |
-| `radfoam_model/occupancy_loss.py` | opacity binarisation + total-variation prior |
-| `radfoam_model/scannetpp_eval.py` | 3D instance AP against the scanned mesh |
-| `sam_masks/` | SAM 2.1 / 3.1 mask precompute |
-| `radfoam_model/data_paths.py` | dataset root resolution (env var, then `data/`) |
-| `scripts/eval_*.py` | LERF-Mask, LERF-OVS, ScanNet++ harnesses |
-| `scripts/eval_lerf_grounded.py` | OpenSplat3D's LERF-Mask protocol (GroundingDINO + SAM) |
-| `scripts/cluster_cells.py` | fits and caches the per-cell clustering every consumer reads |
-| `scripts/summarize_results.py` | rebuilds the reported tables from `results/` |
-| `scripts/make_figures.py` | redraws the figures above from `results/` |
-| `scripts/export_scannetpp_official.py` | predictions in ScanNet++'s official eval format |
-| `scripts/tie_order_sensitivity.py` | how much of AP is decided by arbitrary tie order |
-| `results/scannetpp/`, `results/lerf_mask/` | raw eval output backing the reported numbers |
-
-## Implementation notes
-
-### Variance loss and its backward pass
-
-The renderer already composites one quantity per ray. For a ray crossing cells
-$n = 1 \dots N$ with transmittance $T_n$ and opacity $\alpha_n$, write
-$w_n = T_n \alpha_n$. The instance features give
-
-$$F = \sum_n w_n f_n, \qquad V = \sum_n w_n f_n^2, \qquad s^2 = V - F^2$$
-
-so a second accumulator $V$ turns into a per-ray variance that penalises cells
-disagreeing along the same ray. $V$ is the raw second moment; the subtraction
-happens outside the kernel, which matters below.
-
-The paper writes the loss as $\lVert \operatorname{Var}(F) \rVert_2^2$ per
-ray. $\operatorname{Var}(F)$ is a $D$-vector whose $d$-th entry is the scalar
-variance of channel $d$, so there is no cross term and
-$\partial s^2_d / \partial f_{n,e} = 0$ for $e \neq d$. This implementation
-averages over channels rather than summing,
-
-$$\mathcal{L} = \frac{1}{RD} \sum_{r,d} \bigl(s^2_{r,d}\bigr)^2$$
-
-which differs from the paper by a constant $D$ that `variance_weight` absorbs.
-Channel-diagonality is what lets the *feature* gradient avoid any dot product
-across the feature axis; the density gradient under `instance_guided_geometry`
-necessarily sums over channels (`pipeline.cu:351`).
-
-Backward, two upstream gradients arrive per ray: $g_F$ from the contrastive
-term and $g_V = \partial \mathcal{L}/\partial V = 2 s^2 / (RD)$, the second
-because $\partial s^2/\partial V = 1$. The existing backward is a linear
-operator — given gradient $g$ on $\sum_n w_n x_n$ it returns $w_n g$ — so it is
-applied twice, once with $x_n = f_n$ and once with $x_n = f_n^2$. With the
-weights held fixed, $\partial F/\partial f_n = w_n$ and
-$\partial V/\partial f_n = 2 w_n f_n$, giving
-
-$$\frac{\partial \mathcal{L}}{\partial f_n} = w_n g_F + 2 w_n f_n g_V$$
-
-**The subtlety is who applies the coupling.** $F$ reaches the loss twice —
-directly, and through $s^2 = V - F^2$ with $\partial s^2/\partial F = -2F$.
-Exactly one of autograd and the kernel may account for it. Here
-`s² = V − F²` is a plain tensor op in the live graph, so the `grad_feature`
-handed to the kernel *already* contains the $-2F g_V$ path and the kernel
-applies no correction. OpenSplat3D wraps the same subtraction in
-`torch.no_grad()`, which is why they subtract it by hand instead. The two
-conventions are individually correct and cannot be mixed.
-
-An earlier version of this kernel did mix them, using
-$\hat g_F = g_F - 2F g_V$ under our convention. That double-counts the coupling
-and flips the gradient sign on exactly the cells that dominate a ray. It passed
-a finite-difference check at 0.1 feature scale — 1 failure in 32, dismissable as
-round-off — and failed 22 of 32 at unit scale. `scripts/gradcheck_variance.py`
-runs at unit scale for that reason.
-
-Composing the two terms when $g_F$ carries only the $s^2$ path gives
-$\partial s^2/\partial f_n = 2 w_n (f_n - F)$: each cell is pulled toward the
-ray's own mean feature, scaled by how much it actually contributed. A cell the
-ray barely touches barely moves; one that dominates the ray and disagrees gets
-pushed hard.
-
-The kernel is in `src/tracing/pipeline.cu`.
-
-**Point assignment.** Mesh points are assigned to the nearest cell *that renders*
-(density > 1e-3), not the nearest cell. About a third of cells never render, and
-plain nearest-site lands in one of them 25% of the time.
-
-**Connected-component split.** Instances are split into spatially connected
-components using the Delaunay adjacency, which is the exact form of the DBSCAN
-step OpenSplat3D applies to Gaussian positions.
-
-## Ablations
-
-LERF, single seed:
-
-| change | effect |
-|---|---|
-| variance loss (weight 0.5) | +1.5 mIoU |
-| dropping SAM granularity level 1 | −7.6 mIoU |
-| occupancy prior (binarisation + TV) | +0.2 mIoU, −2.1 mBIoU |
-
-The occupancy prior is kept as a negative result. It commits cells to solid or
-empty reliably (cells with α between 0.1 and 0.9 drop 4–11× — measured once,
-not committed), but most of the
-commitment is deletion, the total-variation term does not measurably contribute,
-and with sites still moving it makes incremental Delaunay updates progressively
-more expensive.
-
-> **Not backed by committed artifacts** — single seed, and the checkpoints
-> behind them were lost. An earlier version of this table also quoted a −0.8
-> LERF-OVS delta for the variance loss; that is an order of magnitude inside
-> that benchmark's repeat-to-repeat spread and has been removed rather than
-> defended.
-
-## Clustering study
-
-Cells carry a feature *and* sit in a Delaunay graph, so the partition can be
-found by clustering the features or by cutting the graph. Both were swept over
-the same 8 scenes and the same checkpoints, so every comparison below is paired
-and per-scene difficulty cancels. Ten configurations were run; the eight with
-`--fill-noise` are below, the two without are further down.
-
-| clustering | AP | AP50 | AP25 |
-|---|---|---|---|
-| HDBSCAN `m=512` | **17.65** | 42.29 | 65.56 |
-| HDBSCAN `m=256` | 17.45 | 42.40 | 64.81 |
-| HDBSCAN `m=1024` | 17.42 | 42.44 | 63.33 |
-| multicut τ=0.3 `m=512` | 15.99 | 37.87 | 59.48 |
-| multicut + SAM votes `m=1024`, `w=1.0` | 15.98 | 36.71 | 59.68 |
-| multicut τ=0.3 `m=1024` | 15.47 | 36.48 | 58.70 |
-| multicut + SAM votes `m=1024`, `w=0.0` | 15.47 | 36.48 | 58.70 |
-| multicut τ=0.3 `m=2048` | 13.75 | 32.52 | 56.81 |
-
-The last two rows are identical on all 8 scenes and every field: `w=0.0` reduces
-exactly to plain multicut at the same `min_size`, which is the control the
-+0.51 AP figure below is measured against.
-
-> **These are the reimplementation's numbers.** The four configurations the
-> conclusions below rest on were re-scored with ScanNet++'s official evaluator
-> (`results/scannetpp_official_clustering.json`), and every direction holds:
->
-> | comparison | this repo's scorer | official scorer |
-> |---|---|---|
-> | multicut vs HDBSCAN, with fill | −1.65 AP, 2/8 | −1.47 AP, 2/8 |
-> | multicut vs HDBSCAN, no fill | +2.20 AP, 8/8 | +1.35 AP, 7/8 |
-> | fill-noise, on HDBSCAN | +6.81 AP, 8/8 | +6.81 AP, 8/8 |
-> | fill-noise, on multicut | +2.96 AP, 6/8 | +3.99 AP, 8/8 |
->
-> Absolute values differ (the official scorer reads ~6 AP higher throughout),
-> but no ordering flips. The one weakening: multicut's no-fill win is 7 of 8
-> officially rather than unanimous.
->
-> **The reimplementation is also order-sensitive.** With
-> uniform confidences the precision-recall ranking is decided by arbitrary
-> cluster order. Permuting it 100× per scene
-> (`scripts/tie_order_sensitivity.py`, raw output in `results/tie_order/`) moves
-> per-scene AP by sd **1.73**, mean range 8.06 — and AP50/AP25 by sd ~3.2, since
-> AP averages nine thresholds and damps the noise while a single threshold does
-> not. The emitted order flatters the 8-scene mean by +0.84 AP. Every comparison
-> below is deterministic and paired, but each measurement carries an arbitrary
-> offset of that size, so **differences under ~2 AP here are not meaningful.**
-
-<p align="center"><img src="assets/figures/tie_order.png" width="88%"></p>
-
-**Multicut loses by 1.66 AP, winning 2 of 8 scenes** — a gap inside the order
-noise above, so the honest reading is that multicut does not beat feature
-clustering, not that it is measurably worse. SAM co-occurrence votes are worth
-+0.51 AP on 5 of 8, well inside it, so not a result. HDBSCAN's `min_cluster_size`
-spans 0.23 AP over 256/512/1024 against multicut's 2.24 — the reported setting is
-untuned, though 0.23 is itself below the noise floor.
-
-What survives the order noise is the no-fill result below — 8 of 8 under this
-scorer, 7 of 8 under the official one. A near-unanimous sign across eight scenes
-is evidence about direction, independent of magnitude.
-
-Two things cut the other way. Multicut is **16× cheaper** per scene as run
-here: 23 s against 368 s end-to-end on a 3090. These timings were measured
-once and are not committed as artifacts, unlike the AP figures above. Profiling puts essentially all of
-HDBSCAN's cost in the cuML fit itself — data transfer and centroids are under
-0.1 s — of which ~84 s is one-time initialisation, so a process fitting
-repeatedly would see ~12× rather than 16×. And with `--fill-noise`
-off, multicut **wins 8 of 8 scenes** by 2.20 AP (13.03 vs 10.84) and its clusters
-need no connected-component split at all, being connected by construction.
-
-The resolution is that filling abstaining cells by nearest centroid in feature
-space supplies the same spatial coherence the graph does, and more of it: it is
-worth +6.82 AP to HDBSCAN but only +2.96 to multicut. The graph encodes real
-structure — it is simply the cheaper post-hoc step that encodes more.
-
-```bash
-python scripts/eval_scannetpp.py --checkpoint output/<run> --model model_020000.pt \
-    --clustering multicut --tau 0.3 --min-cluster-size 512 \
-    --fill-noise --split-connected      # drop --fill-noise for the no-fill arm
-```
 
 ## Scene editing
 
@@ -535,6 +544,13 @@ geometry; inpainting is not addressed here.
   the 8-scene tables apply both throughout.
 - LERF-OVS results come from single runs and moved by several mIoU between
   repeats in the cases checked, so treat small differences there with care.
+- Figures in the text without a `results/` file behind them — mask coverage,
+  cell-render fractions, the clustering timings, the occupancy α histogram —
+  were measured once during development and are not committed. Every number in
+  a table is.
+- LERF-Mask uses OpenSplat3D's grounded protocol as implemented here. Unlike
+  ScanNet++ there is no published evaluator to check it against, so that table
+  has not been cross-validated the way the ScanNet++ one has.
 - `test.py` and `benchmark.py` at the root are upstream Radiant Foam's novel-view
   PSNR harnesses, kept as they are.
 

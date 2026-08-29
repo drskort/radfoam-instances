@@ -103,7 +103,10 @@ def main():
     print(f"\n{'metric':<7}{'as-emitted':>12}{'mean':>9}{'sd':>8}"
           f"{'min':>8}{'max':>8}{'range':>8}")
     out = {"scene": scene, "trials": args.trials,
-           "n_pred": len(predictions), "n_gt": len(gt_instances)}
+           "n_pred": len(predictions),
+           # raw count: average_precision applies MIN_REGION_SIZE itself, so
+           # this is larger than the n_gt eval_scannetpp.py reports
+           "n_gt_raw": len(gt_instances)}
     for j, name in enumerate(("AP", "AP50", "AP25")):
         col = arr[:, j]
         print(f"{name:<7}{rows[0][j]:>12.2f}{col.mean():>9.2f}{col.std(ddof=1):>8.2f}"

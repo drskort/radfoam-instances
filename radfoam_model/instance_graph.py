@@ -757,10 +757,3 @@ def clustering_from_labels(features, labels, seed=0):
     )
 
 
-def graph_clustering(model, method="multicut", **kwargs):
-    """Convenience: partition a loaded model's cells and return a Clustering."""
-    result = fit_graph_clusters(
-        model.att_feat, model.point_adjacency, model.point_adjacency_offsets,
-        method=method, **kwargs
-    )
-    return clustering_from_labels(model.att_feat, result.labels)

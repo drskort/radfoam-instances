@@ -34,3 +34,6 @@ sentencepiece==0.2.2
 #   pip install git+https://github.com/openai/CLIP.git
 ftfy==6.3.1
 regex==2026.7.19
+
+# Figures (scripts/make_figures.py).
+matplotlib==3.10.9

@@ -39,7 +39,6 @@ source "$VENV_DIR/bin/activate"
 
 uv pip install torch==2.10.0 torchvision --index-url https://download.pytorch.org/whl/cu128
 # numpy is held below 2 by sam3's own pin (sam3/pyproject.toml: "numpy>=1.26,<2").
-uv pip install 'numpy<2' pillow pycocotools pycolmap==3.11.1 tqdm pytest huggingface_hub
 
 # sam3 imports einops (sam3/sam/rope.py) and psutil (sam3/model/sam3_video_predictor.py)
 # at runtime but lists neither in its core [project.dependencies] -- einops only
