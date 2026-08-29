@@ -9,4 +9,4 @@ source .venv/bin/activate
 NVLIBS=$(find "$REPO/.venv/lib/python3.10/site-packages/nvidia" -name lib -type d 2>/dev/null | tr "\n" ":")
 export LD_LIBRARY_PATH="${NVLIBS}${LD_LIBRARY_PATH:-}"
 python scripts/export_scannetpp_official.py --checkpoint "$CHECKPOINT" \
-    --model "${MODEL:-model_020000.pt}" --out "$OUT"
+    --model "${MODEL:-model_020000.pt}" --out "$OUT" ${EXPORT_ARGS:-}

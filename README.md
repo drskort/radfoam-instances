@@ -35,6 +35,8 @@ as the LERF-Mask table below, not separate evaluations:
 | teatime | 81.16 | 70.33 | +10.83 | +12.94 |
 | **mean** | **82.68** | **75.29** | **+7.39** | **+11.53** |
 
+<p align="center"><img src="assets/figures/guided_geometry.png" width="62%"></p>
+
 An earlier single-seed run on one scene put this at +22.4; that figure does not
 survive a paired three-scene measurement and has been replaced rather than kept.
 Note figurines barely moves (+1.16) while ramen and teatime gain ~10. Two
@@ -104,6 +106,8 @@ scenes. The reimplementation is kept because every clustering experiment below
 was run through it and it is far cheaper to iterate on, but it is a development
 tool, not a scorer: **only the official numbers are comparable to published
 work.**
+
+<p align="center"><img src="assets/figures/official_vs_ours.png" width="88%"></p>
 
 The remaining non-comparability cuts against this row: the baselines are on all
 50 scenes of the validation split, this repo on the first 8, where per-scene AP
@@ -336,6 +340,9 @@ Regenerate the scene list with
 | `scripts/eval_lerf_grounded.py` | OpenSplat3D's LERF-Mask protocol (GroundingDINO + SAM) |
 | `scripts/cluster_cells.py` | fits and caches the per-cell clustering every consumer reads |
 | `scripts/summarize_results.py` | rebuilds the reported tables from `results/` |
+| `scripts/make_figures.py` | redraws the figures above from `results/` |
+| `scripts/export_scannetpp_official.py` | predictions in ScanNet++'s official eval format |
+| `scripts/tie_order_sensitivity.py` | how much of AP is decided by arbitrary tie order |
 | `results/scannetpp/`, `results/lerf_mask/` | raw eval output backing the reported numbers |
 
 ## Implementation notes
@@ -462,6 +469,8 @@ exactly to plain multicut at the same `min_size`, which is the control the
 > not. The emitted order flatters the 8-scene mean by +0.84 AP. Every comparison
 > below is deterministic and paired, but each measurement carries an arbitrary
 > offset of that size, so **differences under ~2 AP here are not meaningful.**
+
+<p align="center"><img src="assets/figures/tie_order.png" width="88%"></p>
 
 **Multicut loses by 1.66 AP, winning 2 of 8 scenes** — a gap inside the order
 noise above, so the honest reading is that multicut does not beat feature

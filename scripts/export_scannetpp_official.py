@@ -71,6 +71,12 @@ def main():
     ap.add_argument("--min-cluster-size", type=int, default=512)
     ap.add_argument("--min-samples", type=int, default=16)
     ap.add_argument("--min-vertices", type=int, default=100)
+    ap.add_argument("--clustering", default="hdbscan",
+                    choices=["hdbscan", "multicut"])
+    ap.add_argument("--tau", type=float, default=0.3)
+    ap.add_argument("--no-fill", action="store_true",
+                    help="Skip the nearest-centroid fill, matching the "
+                         "no-fill arm of the clustering study.")
     args = ap.parse_args()
 
     # Their evaluator indexes metadata/semantic_classes.txt (2878 entries), NOT
@@ -92,12 +98,25 @@ def main():
     model, _, dataset_args = load_model(args.checkpoint, device, args.model)
     scene = dataset_args.scene
 
-    from radfoam_model.instance_cluster import fit_clusters_full
-    labels, clustering = fit_clusters_full(
-        model.att_feat, min_cluster_size=args.min_cluster_size,
-        min_samples=args.min_samples)
-    labels = fill_noise_labels(labels, model.att_feat.detach(),
-                               clustering.centroids).cpu().numpy()
+    if args.clustering == "hdbscan":
+        from radfoam_model.instance_cluster import fit_clusters_full
+        labels, clustering = fit_clusters_full(
+            model.att_feat, min_cluster_size=args.min_cluster_size,
+            min_samples=args.min_samples)
+    else:
+        from radfoam_model.instance_graph import (
+            clustering_from_labels, fit_graph_clusters)
+        result = fit_graph_clusters(
+            model.att_feat, model.point_adjacency,
+            model.point_adjacency_offsets, method="multicut",
+            min_size=args.min_cluster_size, tau=args.tau, metric="euclidean")
+        labels = result.labels
+        clustering = clustering_from_labels(model.att_feat, labels)
+    if args.no_fill:
+        labels = labels.cpu().numpy()
+    else:
+        labels = fill_noise_labels(labels, model.att_feat.detach(),
+                                   clustering.centroids).cpu().numpy()
     from radfoam_model.instance_graph import undirected_edges
     edges = undirected_edges(model.point_adjacency,
                              model.point_adjacency_offsets).cpu().numpy()
