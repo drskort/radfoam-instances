@@ -102,7 +102,8 @@ def main():
     # No flags: any argv is a mistake, and running it silently rewrites the
     # committed PNGs and dirties the tree.
     if len(sys.argv) > 1:
-        raise SystemExit(__doc__)
+        print(__doc__)
+        return
     OUT.mkdir(parents=True, exist_ok=True)
     fig_official_vs_ours()
     fig_tie_order()
