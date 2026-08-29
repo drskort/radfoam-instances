@@ -460,7 +460,22 @@ The last two rows are identical on all 8 scenes and every field: `w=0.0` reduces
 exactly to plain multicut at the same `min_size`, which is the control the
 +0.51 AP figure below is measured against.
 
-> **These are the reimplementation's numbers, and it is order-sensitive.** With
+> **These are the reimplementation's numbers.** The four configurations the
+> conclusions below rest on were re-scored with ScanNet++'s official evaluator
+> (`results/scannetpp_official_clustering.json`), and every direction holds:
+>
+> | comparison | this repo's scorer | official scorer |
+> |---|---|---|
+> | multicut vs HDBSCAN, with fill | −1.65 AP, 2/8 | −1.47 AP, 2/8 |
+> | multicut vs HDBSCAN, no fill | +2.20 AP, 8/8 | +1.35 AP, 7/8 |
+> | fill-noise, on HDBSCAN | +6.81 AP, 8/8 | +6.81 AP, 8/8 |
+> | fill-noise, on multicut | +2.96 AP, 6/8 | +3.99 AP, 8/8 |
+>
+> Absolute values differ (the official scorer reads ~6 AP higher throughout),
+> but no ordering flips. The one weakening: multicut's no-fill win is 7 of 8
+> officially rather than unanimous.
+>
+> **The reimplementation is also order-sensitive.** With
 > uniform confidences the precision-recall ranking is decided by arbitrary
 > cluster order. Permuting it 100× per scene
 > (`scripts/tie_order_sensitivity.py`, raw output in `results/tie_order/`) moves
@@ -479,8 +494,9 @@ clustering, not that it is measurably worse. SAM co-occurrence votes are worth
 spans 0.23 AP over 256/512/1024 against multicut's 2.24 — the reported setting is
 untuned, though 0.23 is itself below the noise floor.
 
-What does survive the order noise is the 8/8 no-fill result below: unanimity
-across eight scenes is a sign test on direction, independent of magnitude.
+What survives the order noise is the no-fill result below — 8 of 8 under this
+scorer, 7 of 8 under the official one. A near-unanimous sign across eight scenes
+is evidence about direction, independent of magnitude.
 
 Two things cut the other way. Multicut is **16× cheaper** per scene as run
 here: 23 s against 368 s end-to-end on a 3090. These timings were measured
