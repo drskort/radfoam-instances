@@ -15,6 +15,36 @@ CUDA backward, the Delaunay-graph multicut, and the ScanNet++ evaluation.
   <a href="assets/snpp_instances/instances_model_016000.mp4">ScanNet++</a></sub>
 </p>
 
+## What this does
+
+SAM masks are precomputed for every training view at three granularity levels. A
+16-dimensional instance embedding is attached to each Voronoi cell and trained by
+a contrastive loss over those masks, composited along rays by the same tracer
+that renders colour. Two things are added on top of the OpenSplat3D recipe:
+
+- **The instance gradient also shapes geometry.** By default it only moves
+  features; letting it move site positions and densities as well is worth
+  [+7.4 mIoU](#geometry-guided-instance-gradients).
+- **A variance loss** accumulates a second moment per ray alongside the feature
+  mean, penalising rays whose cells disagree. It needs a custom CUDA backward,
+  derived analytically and checked against `torch.autograd.gradcheck`
+  (`src/tracing/pipeline.cu`, `scripts/gradcheck_variance.py`).
+
+The trained embedding is clustered into 3D objects — HDBSCAN over cell features,
+or a [multicut](#hdbscan-vs-multicut) over the Delaunay adjacency — and each
+cluster is given a language embedding from multi-scale crops of the views that
+see it best, so objects can be retrieved by text.
+
+Evaluation is on ScanNet++ 3D instance AP against the scanned mesh, and on
+LERF-Mask and LERF-OVS for open-vocabulary retrieval. Mesh points are assigned to
+the nearest cell *that renders* (density > 1e-3) rather than the nearest site;
+about a third of cells never render. Instances are then split into spatially
+connected components over the Delaunay adjacency, the exact form of the DBSCAN
+step OpenSplat3D applies to Gaussian positions.
+
+The maths behind the variance backward is not reproduced here; the derivation is
+in the kernel's comments and the gradcheck script.
+
 ## Results
 
 ### ScanNet++ 3D instance segmentation
@@ -99,86 +129,6 @@ structure, and a feature-space fill encodes more of it for less.
 Instances can be removed and the scene re-rendered. Objects are reconstructed as
 opaque shells over empty space, so deletion exposes a hole rather than interior
 geometry.
-
-## Method
-
-### Variance loss
-
-The renderer already composites one quantity per ray. For a ray crossing cells
-$n = 1 \dots N$ with transmittance $T_n$ and opacity $\alpha_n$, write
-$w_n = T_n \alpha_n$. The instance features give
-
-$$F = \sum_n w_n f_n, \qquad V = \sum_n w_n f_n^2, \qquad s^2 = V - F^2$$
-
-so a second accumulator $V$ turns into a per-ray variance that penalises cells
-disagreeing along the same ray. $V$ is the raw second moment; the subtraction
-happens outside the kernel, which matters below.
-
-The paper writes the loss as $\lVert \operatorname{Var}(F) \rVert_2^2$ per
-ray. $\operatorname{Var}(F)$ is a $D$-vector whose $d$-th entry is the scalar
-variance of channel $d$, so there is no cross term and
-$\partial s^2_d / \partial f_{n,e} = 0$ for $e \neq d$. This implementation
-averages over channels rather than summing,
-
-$$\mathcal{L} = \frac{1}{RD} \sum_{r,d} \bigl(s^2_{r,d}\bigr)^2$$
-
-which differs from the paper by a constant $D$ that `variance_weight` absorbs.
-Channel-diagonality is what lets the *feature* gradient avoid any dot product
-across the feature axis; the density gradient under `instance_guided_geometry`
-necessarily sums over channels (`pipeline.cu:351`).
-
-Backward, two upstream gradients arrive per ray: $g_F$ from the contrastive
-term and $g_V = \partial \mathcal{L}/\partial V = 2 s^2 / (RD)$, the second
-because $\partial s^2/\partial V = 1$. The existing backward is a linear
-operator — given gradient $g$ on $\sum_n w_n x_n$ it returns $w_n g$ — so it is
-applied twice, once with $x_n = f_n$ and once with $x_n = f_n^2$. With the
-weights held fixed, $\partial F/\partial f_n = w_n$ and
-$\partial V/\partial f_n = 2 w_n f_n$, giving
-
-$$\frac{\partial \mathcal{L}}{\partial f_n} = w_n g_F + 2 w_n f_n g_V$$
-
-**The subtlety is who applies the coupling.** $F$ reaches the loss twice —
-directly, and through $s^2 = V - F^2$ with $\partial s^2/\partial F = -2F$.
-Exactly one of autograd and the kernel may account for it. Here
-`s² = V − F²` is a plain tensor op in the live graph, so the `grad_feature`
-handed to the kernel *already* contains the $-2F g_V$ path and the kernel
-applies no correction. OpenSplat3D wraps the same subtraction in
-`torch.no_grad()`, which is why they subtract it by hand instead. The two
-conventions are individually correct and cannot be mixed.
-
-An earlier version of this kernel did mix them, using
-$\hat g_F = g_F - 2F g_V$ under our convention. That double-counts the coupling
-and flips the gradient sign on exactly the cells that dominate a ray. It passed
-a finite-difference check at 0.1 feature scale — 1 failure in 32, dismissable as
-round-off — and failed 22 of 32 at unit scale. `scripts/gradcheck_variance.py`
-runs at unit scale for that reason.
-
-Composing the two terms when $g_F$ carries only the $s^2$ path gives
-$\partial s^2/\partial f_n = 2 w_n (f_n - F)$: each cell is pulled toward the
-ray's own mean feature, scaled by how much it actually contributed. A cell the
-ray barely touches barely moves.
-
-The kernel is in `src/tracing/pipeline.cu`.
-
-**Point assignment.** Mesh points are assigned to the nearest cell *that renders*
-(density > 1e-3), not the nearest cell. About a third of cells never render, and
-plain nearest-site lands in one of them 25% of the time.
-
-**Connected-component split.** Instances are split into spatially connected
-components using the Delaunay adjacency, which is the exact form of the DBSCAN
-step OpenSplat3D applies to Gaussian positions.
-
-### Point assignment
-
-Mesh points are assigned to the nearest cell *that renders* (density > 1e-3).
-About a third of cells never render, and plain nearest-site lands in one of them
-a quarter of the time.
-
-### Connected-component split
-
-Instances are split into spatially connected components over the Delaunay
-adjacency — the exact form of the DBSCAN step OpenSplat3D applies to Gaussian
-positions.
 
 ## Install
 
