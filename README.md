@@ -54,11 +54,16 @@ Class-agnostic, scored on mesh points by ScanNet++'s
 > means from the OpenSplat3D paper; this row is 8 of those scenes, where
 > per-scene AP spans 13.5–30.7. No baseline publishes per-scene results, so the
 > rows cannot be reconciled. Read them for order of magnitude only.
+>
+> This row also includes the nearest-centroid noise fill described below, worth
+> +6.8 AP. OpenSplat3D's 24.5 row likewise includes their DBSCAN denoising.
 
 ### LERF-Mask
 
-Grounded protocol, mean over figurines / ramen / teatime — the same three scenes
-the baselines use.
+Mean over figurines / ramen / teatime. The protocol is OpenSplat3D's: a prompt
+is grounded with GroundingDINO + SAM in one reference view rather than queried
+against a language field, so the Gaussian Grouping and ILGS rows come from a
+different procedure. Their masks may overlap; a partition of space cannot.
 
 | method | mIoU | mBIoU |
 |---|---|---|
@@ -89,16 +94,17 @@ The cells carry a feature *and* sit in a Delaunay graph, so the partition can be
 found either way. Best configuration of each, paired on the same scenes and
 checkpoints.
 
-| clustering | AP | AP50 | AP25 | per scene |
+| clustering | AP | AP50 | AP25 | eval job |
 |---|---|---|---|---|
 | HDBSCAN, `min_cluster_size=512` | 23.9 | 49.4 | 67.6 | 368 s |
 | multicut, τ=0.3, `min_size=512` | 22.4 | 44.8 | 62.6 | 23 s |
 
+End-to-end eval on one RTX 3090, measured once.
+
 The graph cut does not win, though it is 16× cheaper. Both methods leave cells
 unlabelled — HDBSCAN abstains on ~70% — and the numbers above fill those by
 nearest centroid in feature space. That fill is worth +6.8 AP to HDBSCAN and
-+4.0 to multicut; without it, multicut leads on 7 of 8 scenes. The graph encodes
-real structure, and a feature-space fill encodes more of it for less.
++4.0 to multicut; without it, multicut leads on 7 of 8 scenes.
 
 ### Scene editing
 
@@ -154,7 +160,8 @@ python -m sam_masks.run_image --scene teatime --model sam21_levels --tag t70
 python train.py -c configs/lerf_mask.yaml --scene teatime \
     --instance_guided_geometry --instance_weight 0.1 --variance_weight 0.5
 
-# 3. Cluster once; every consumer reads this cache, so instance ids agree
+# 3. Cluster once. The LERF evaluators read this cache, so instance ids agree
+#    with the renders and the language table.
 python scripts/cluster_cells.py --checkpoint output/<run> --method full
 
 # 4. Evaluate
@@ -206,8 +213,8 @@ Most of this tree is upstream Radiant Foam. Mine:
   checkpoints and are sound. Those against published means are not.
 - **LERF-OVS**: 66.1 mIoU with SigLIP, 63.3 with MasQCLIP, against 59.7 for
   OpenSplat3D. Single runs on a metric that moved several mIoU between repeats,
-  checkpoint lost, and its annotated frames are training views. Nothing rests
-  on it.
+  checkpoint lost, and its annotated frames are training views. Not in
+  `results/` — unlike every other number here, these cannot be checked.
 - **LERF-Mask** has no external evaluator to check against, unlike ScanNet++.
 - **The occupancy prior did not work.** Binarising opacity with a
   total-variation term commits cells reliably, but most of the commitment is

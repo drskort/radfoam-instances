@@ -124,6 +124,34 @@ def official(path):
     print("  OpenSplat3D 19.2 / 37.3 / 56.2; + DBSCAN 24.5 / 41.7 / 57.1")
 
 
+def clustering_official(path):
+    """HDBSCAN vs multicut, both arms, under ScanNet++'s official evaluator."""
+    if not path.is_file():
+        return
+    d = json.loads(path.read_text())
+    scenes, off = d["scenes"], d["official"]
+    label = {"hdbscan": "HDBSCAN m=512", "multicut": "multicut t=0.3 m=512",
+             "hdb_nofill": "HDBSCAN [no fill]", "mc_nofill": "multicut [no fill]"}
+    print("\n=== HDBSCAN vs multicut: official evaluator ===")
+    print(f"  {'config':<22}{'AP':>7}{'AP50':>8}{'AP25':>8}")
+    mean = {}
+    for c in ("hdbscan", "multicut", "hdb_nofill", "mc_nofill"):
+        a = np.array([off[c][s] for s in scenes]).mean(axis=0)
+        mean[c] = a
+        print(f"  {label[c]:<22}{a[0]:>7.1f}{a[1]:>8.1f}{a[2]:>8.1f}")
+    ap = lambda c: np.array([off[c][s][0] for s in scenes])
+    for a, b, name in [("multicut", "hdbscan", "multicut vs HDBSCAN"),
+                       ("mc_nofill", "hdb_nofill", "same, without the fill"),
+                       ("hdbscan", "hdb_nofill", "fill-noise on HDBSCAN"),
+                       ("multicut", "mc_nofill", "fill-noise on multicut")]:
+        dd = ap(a) - ap(b)
+        print(f"  {name:<26}{dd.mean():+6.2f} AP   ahead on {int((dd > 0).sum())}/{len(scenes)}")
+    tm = d.get("timings_seconds", {})
+    if tm:
+        print(f"  timing: HDBSCAN {tm['hdbscan']} s vs multicut {tm['multicut']} s "
+              f"per scene ({tm['hdbscan'] / tm['multicut']:.0f}x) — {tm['note']}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--results", type=Path, default=RESULTS)
@@ -185,6 +213,8 @@ def main():
     lerf = args.results.parent / "lerf_mask"
     if lerf.is_dir():
         lerf_mask(lerf)
+
+    clustering_official(args.results.parent / "scannetpp_official_clustering.json")
 
     abl = args.results.parent / "ablation" / "guided_geometry"
     if abl.is_dir():
