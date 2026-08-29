@@ -29,10 +29,17 @@ at 20k iterations.
 | Segment3D | 50 | 13.0 | 23.8 | 38.3 |
 | OpenSplat3D | 50 | 19.2 | 37.3 | 56.2 |
 | OpenSplat3D + DBSCAN denoising | 50 | 24.5 | 41.7 | 57.1 |
-| this repo, HDBSCAN `min_cluster_size=512` | 8 | 23.9 | **49.4** | **67.6** |
+| this repo, HDBSCAN `min_cluster_size=512` | 8 | 23.9 | 49.4 | 67.6 |
 
-Eight of their fifty scenes, so this is a competitive result, not a win. See
-[Limitations](#limitations) for the two effects large enough to matter.
+> **The baseline rows are reference values, not a comparison.** They are means
+> over all 50 scenes of the validation split, taken from the OpenSplat3D paper;
+> this repo's row is a mean over 8 of those scenes. Per-scene AP here spans 13.5
+> to 30.7, so a different subset moves the number by more than the gaps in the
+> table. No per-scene results are published for any baseline, so the two cannot
+> be reconciled without running those methods on this subset or running this one
+> on all 50. **Read the rows as context for the order of magnitude, not as
+> evidence that one method beats another.** The tie-order noise in
+> [Limitations](#limitations) applies on top of this.
 
 ### LERF-Mask
 
@@ -67,7 +74,9 @@ mean at +22.4; it did not survive the paired measurement.
 
 Cells carry a learned feature *and* sit in a Delaunay graph, so the partition
 can be found by clustering the features or by cutting the graph. Best
-configuration of each, same 8 scenes, same checkpoints, official scorer.
+configuration of each, same 8 scenes, same checkpoints, official scorer — unlike
+the baseline table above, this one is paired, so the two rows are comparable to
+each other.
 
 | clustering | AP | AP50 | AP25 | per scene |
 |---|---|---|---|---|
@@ -336,6 +345,13 @@ under ~2 AP anywhere above are not meaningful, including the HDBSCAN–multicut
 gap.
 
 <p align="center"><img src="assets/figures/tie_order.png" width="88%"></p>
+
+**Comparisons across published numbers.** Everything measured here uses 8 of
+the 50 ScanNet++ validation scenes, and no baseline publishes per-scene results.
+Comparisons *within* this repo — the two clusterings, the two ablation arms, the
+fill/no-fill arms — are paired on identical scenes and checkpoints and are
+sound. Comparisons against published means are not, and are marked as reference
+values wherever they appear.
 
 **Two scorers.** `radfoam_model/scannetpp_eval.py` reimplements ScanNet++'s
 scorer and reads about 6 AP low, by a margin that varies from −0.5 to +10.7
