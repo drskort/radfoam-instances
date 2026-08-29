@@ -453,11 +453,25 @@ The last two rows are identical on all 8 scenes and every field: `w=0.0` reduces
 exactly to plain multicut at the same `min_size`, which is the control the
 +0.51 AP figure below is measured against.
 
-**Multicut loses, by 1.66 AP on 2 of 8 scenes won.** SAM co-occurrence votes on
-the graph edges are worth +0.51 AP on 5 of 8 — inside the scene-to-scene spread,
-so not a result. HDBSCAN is also insensitive to `min_cluster_size` (256/512/1024
-span 0.23 AP), while multicut's grid spans 2.24, so the graph method is the more
-tuning-sensitive of the two as well.
+> **These are the reimplementation's numbers, and it is order-sensitive.** With
+> uniform confidences the precision-recall ranking is decided by arbitrary
+> cluster order. Permuting it 100× per scene
+> (`scripts/tie_order_sensitivity.py`, raw output in `results/tie_order/`) moves
+> per-scene AP by sd **1.73**, mean range 8.06 — and AP50/AP25 by sd ~3.2, since
+> AP averages nine thresholds and damps the noise while a single threshold does
+> not. The emitted order flatters the 8-scene mean by +0.84 AP. Every comparison
+> below is deterministic and paired, but each measurement carries an arbitrary
+> offset of that size, so **differences under ~2 AP here are not meaningful.**
+
+**Multicut loses by 1.66 AP, winning 2 of 8 scenes** — a gap inside the order
+noise above, so the honest reading is that multicut does not beat feature
+clustering, not that it is measurably worse. SAM co-occurrence votes are worth
++0.51 AP on 5 of 8, well inside it, so not a result. HDBSCAN's `min_cluster_size`
+spans 0.23 AP over 256/512/1024 against multicut's 2.24 — the reported setting is
+untuned, though 0.23 is itself below the noise floor.
+
+What does survive the order noise is the 8/8 no-fill result below: unanimity
+across eight scenes is a sign test on direction, independent of magnitude.
 
 Two things cut the other way. Multicut is **16× cheaper** per scene as run
 here: 23 s against 368 s end-to-end on a 3090. These timings were measured
