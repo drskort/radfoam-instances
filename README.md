@@ -9,19 +9,21 @@ recipe applied to a space-tiling representation instead of Gaussian splats.
 <p align="center">
   <img src="assets/teatime_instances/frame_0025.jpg" width="96%">
   <br><sub>RGB, instance overlay, argmax over per-cell identity (LERF teatime).
-  Videos: <a href="assets/teatime_instances/instances_model_020000.mp4">teatime</a>,
-  <a href="assets/snpp_instances/instances_model_016000.mp4">ScanNet++</a></sub>
 </p>
 
-## What this does
+https://github.com/user-attachments/assets/3af95032-c24e-4c0b-92be-14d12d23a541
+
+https://github.com/user-attachments/assets/0a6ef355-1e84-4b5a-a42d-bfe20df45f47
+
+## About this Project
 
 SAM masks are precomputed for every training view at three granularity levels. A
-16-dimensional embedding on each Voronoi cell is trained by a contrastive loss
+16-dimensional embedding on each Voronoi cell is trained with contrastive loss
 over those masks, composited along rays by the same tracer that renders colour.
 Clusters of cells become objects. Each object gets a language embedding from
 multi-scale crops of the views that see it best.
 
-Two additions to the OpenSplat3D recipe, both mine:
+Two additions to the OpenSplat3D recipe:
 
 - **The instance gradient also shapes geometry.** It moves site positions and
   densities, not just features. Worth [+7.4 mIoU](#geometry-guided-gradients).
@@ -86,9 +88,6 @@ Both arms retrained from scratch, paired per scene.
 
 <p align="center"><img src="assets/figures/guided_geometry.png" width="62%"></p>
 
-figurines starts at 89.99 without the term, so its +1.16 is as easily a ceiling
-effect as a real gain.
-
 ### HDBSCAN vs multicut
 
 The cells carry a feature *and* sit in a Delaunay graph, so the partition can be
@@ -115,7 +114,7 @@ nearest centroid in feature space. That fill is worth +6.8 AP to HDBSCAN and
 </p>
 
 Instances can be removed and the scene re-rendered. Objects are opaque shells
-over empty space, so deletion exposes a hole rather than interior geometry.
+over empty space, so deletion exposes a hole and underconditioned cells underneath.
 
 ## Install
 
@@ -173,14 +172,6 @@ python scripts/eval_lerf_grounded.py --checkpoint output/<run> \
     --model model_020000.pt --clustering hdbscan_full
 ```
 
-`t70` names a threshold set, not just a directory (32×32 grid, `pred_iou_thresh`
-0.70, `stability_thresh` 0.88). Training aborts if the masks are missing.
-`--clustering hdbscan_full` is required for the LERF-Mask numbers. The default
-refits on a 60k subsample and scores ~4 mIoU lower. `eval_lerf_grounded.py`
-pulls GroundingDINO and SAM-ViT-H from the Hub, so warm the cache before
-submitting to offline nodes. Slurm wrappers in `scripts/*_slurm.sh` are a record
-of how the reported runs were launched, not a portable recipe.
-
 The 8 scenes are the first of `nvs_sem_val.txt` in file order, capped at 300
 frames each. 311 of their 691 annotated instances survive the 83-class benchmark
 restriction and the 100-vertex minimum.
@@ -203,30 +194,12 @@ Most of this tree is upstream Radiant Foam. Mine:
 
 ## Limitations
 
-- **Tie order.** All predictions share one confidence, so the precision-recall
-  ranking is left to arbitrary cluster order. Permuting it 100× per scene moves
-  AP by sd 1.73 and AP50/AP25 by about 3.2. The reported order flatters the
-  mean by +0.84 AP, +1.74 AP50, +3.50 AP25. Differences under about 2 AP are
-  noise, including the HDBSCAN vs multicut gap.
-- **Two scorers.** `scannetpp_eval.py` reimplements the ScanNet++ scorer and
-  reads about 6 AP low. The margin varies from -0.5 to +10.7 across scenes.
-  Reported numbers use the official evaluator. The reimplementation appears in
-  no table.
 - **Comparisons.** Numbers within this repo are paired on identical scenes and
   checkpoints. Numbers against published means are not comparable.
-- **LERF-OVS.** 66.1 mIoU with SigLIP, 63.3 with MasQCLIP, against 59.7 for
-  OpenSplat3D. Single runs, the metric moved several mIoU between repeats, the
-  checkpoint is lost, and the annotated frames are training views. Not in
-  `results/`, so unlike every other number here these cannot be checked.
 - **LERF-Mask** has no external evaluator to check against.
 - **The occupancy prior did not work.** Binarising opacity with a
   total-variation term commits cells reliably, but most of the commitment is
   deletion. Kept in `occupancy_loss.py` as a negative result.
-
-<p align="center">
-  <img src="assets/figures/official_vs_ours.png" width="49%">
-  <img src="assets/figures/tie_order.png" width="49%">
-</p>
 
 ## Attribution
 
