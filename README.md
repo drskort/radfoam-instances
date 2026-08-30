@@ -8,14 +8,14 @@ recipe applied to a space-tiling representation instead of Gaussian splats.
 
 <p align="center">
   <img src="assets/teatime_instances/frame_0025.jpg" width="96%">
-  <br><sub>RGB, instance overlay, argmax over per-cell identity (LERF teatime).
+  <br><sub>RGB, instance overlay, argmax over per-cell identity (LERF teatime).</sub>
 </p>
 
 https://github.com/user-attachments/assets/3af95032-c24e-4c0b-92be-14d12d23a541
 
 https://github.com/user-attachments/assets/0a6ef355-1e84-4b5a-a42d-bfe20df45f47
 
-## About this Project
+## About this project
 
 SAM masks are precomputed for every training view at three granularity levels. A
 16-dimensional embedding on each Voronoi cell is trained with contrastive loss
@@ -114,7 +114,7 @@ nearest centroid in feature space. That fill is worth +6.8 AP to HDBSCAN and
 </p>
 
 Instances can be removed and the scene re-rendered. Objects are opaque shells
-over empty space, so deletion exposes a hole and underconditioned cells underneath.
+over empty space, so deletion exposes a hole and under-constrained cells underneath.
 
 ## Install
 
