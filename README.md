@@ -15,6 +15,11 @@ https://github.com/user-attachments/assets/3af95032-c24e-4c0b-92be-14d12d23a541
 
 https://github.com/user-attachments/assets/0a6ef355-1e84-4b5a-a42d-bfe20df45f47
 
+## Motivation
+
+OpenSplat3D learned instance embeddings from SAM masks but instances have smooth boundaries between splats.
+Voronoi Cells partition the space cleanly making these boundaries clean.
+
 ## About this project
 
 SAM masks are precomputed for every training view at three granularity levels. A
