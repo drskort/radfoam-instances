@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/0a6ef355-1e84-4b5a-a42d-bfe20df45f47
 
 ## Motivation
 
-OpenSplat3D learns instance embeddings on Gaussian splats, but splats overlap and fade into one another, so object boundaries inherit that blur. Radiant Foam's Voronoi cells tile space with no overlay. This mean every point belongs to exactly one cell, so an instance partition over cells maintains crisp boundaries by construction. This repo tests whether that structural advantage shows up in practice. It does: the strongest boundary accuracy (77.7 mBIoU) in the LERF-Mask comparison below.
+OpenSplat3D learns instance embeddings on Gaussian splats, but splats overlap and fade into one another, so object boundaries inherit that blur. Radiant Foam's Voronoi cells tile space with no overlap. This means every point belongs to exactly one cell, so an instance partition over cells maintains crisp boundaries by construction. This repo tests whether that structural advantage shows up in practice. It does: the strongest boundary accuracy (77.7 mBIoU) in the LERF-Mask comparison below.
 
 ## About this project
 
