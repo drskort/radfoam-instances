@@ -166,15 +166,19 @@ python train.py -c configs/lerf_mask.yaml --scene teatime \
 #    with the renders and the language table.
 python scripts/cluster_cells.py --checkpoint output/<run> --method full
 
-# 4. Evaluate
-python scripts/eval_scannetpp.py --checkpoint output/<run> --model model_020000.pt \
-    --clustering hdbscan --min-cluster-size 512 --fill-noise --split-connected
+# 4. Evaluate. ScanNet++: export, then score with the official evaluator
+#    (semantic/eval/eval_instance.py from github.com/scannetpp/scannetpp).
+#    Export defaults match the reported configuration.
+python scripts/export_scannetpp_official.py --checkpoint output/<run> \
+    --model model_020000.pt --out export/<run>
 python scripts/eval_lerf_grounded.py --checkpoint output/<run> \
     --model model_020000.pt --clustering hdbscan_full
-```
 
-`eval_scannetpp.py` uses a reimplemented scorer that reads about 6 AP low. The
-tables use the official evaluator, exported via `export_scannetpp_official.py`.
+# Optional quick check without the export round-trip. This reimplements the
+# scorer and reads about 6 AP low, no table uses it.
+python scripts/eval_scannetpp.py --checkpoint output/<run> --model model_020000.pt \
+    --clustering hdbscan --min-cluster-size 512 --fill-noise --split-connected
+```
 
 The 8 scenes are the first of `nvs_sem_val.txt` in file order, capped at 300
 frames each. 311 of their 691 annotated instances survive the 83-class benchmark
