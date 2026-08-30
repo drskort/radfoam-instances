@@ -104,7 +104,8 @@ End-to-end eval on one RTX 3090, measured once.
 The graph cut does not win, though it is 16× cheaper. Both methods leave cells
 unlabelled (HDBSCAN abstains on ~70%). The numbers above fill those cells by
 nearest centroid in feature space. That fill is worth +6.8 AP to HDBSCAN and
-+4.0 to multicut. Without it, multicut leads on 7 of 8 scenes.
++4.0 to multicut. Without it, multicut leads on 7 of 8 scenes. Differences under
+about 2 AP are noise from arbitrary tie order, including this gap.
 
 ### Scene editing
 
@@ -171,6 +172,9 @@ python scripts/eval_scannetpp.py --checkpoint output/<run> --model model_020000.
 python scripts/eval_lerf_grounded.py --checkpoint output/<run> \
     --model model_020000.pt --clustering hdbscan_full
 ```
+
+`eval_scannetpp.py` uses a reimplemented scorer that reads about 6 AP low. The
+tables use the official evaluator, exported via `export_scannetpp_official.py`.
 
 The 8 scenes are the first of `nvs_sem_val.txt` in file order, capped at 300
 frames each. 311 of their 691 annotated instances survive the 83-class benchmark
