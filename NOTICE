@@ -1,0 +1,48 @@
+Instance segmentation for Radiant Foam
+Copyright 2026 Rodion Prikhodovsky
+
+This product includes software developed by The Radiant Foam Authors
+(https://github.com/theialab/radfoam), licensed under the Apache License 2.0.
+
+This is a modified fork. Files changed or added relative to upstream include:
+
+  radfoam_model/instance_loss.py       added
+  radfoam_model/instance_cluster.py    added
+  radfoam_model/instance_graph.py      added
+  radfoam_model/instance_language.py   added
+  radfoam_model/instance_masks.py      added
+  radfoam_model/occupancy_loss.py      added
+  radfoam_model/scannetpp_eval.py      added
+  radfoam_model/checkpoint.py          added
+  radfoam_model/data_paths.py          added
+  data_loader/scannetpp.py             added
+  sam_masks/                           added
+  scripts/                             added (except torch_info.py, upstream)
+  results/, assets/figures/            added
+  src/tracing/pipeline.cu              modified: feature and second-moment
+                                       accumulation, analytic backward,
+                                       instance-guided geometry
+  train.py, data_loader/__init__.py,   modified
+  data_loader/colmap.py, configs/
+
+Upstream files retained unmodified include src/ (except tracing/pipeline.cu),
+torch_bindings/, external/, viewer.py, test.py, benchmark.py,
+prepare_colmap_data.py and the CMake build system.
+
+--------------------------------------------------------------------------------
+Third-party components not distributed with this repository
+--------------------------------------------------------------------------------
+
+third_party/masqclip.py is NOT included. It originates from MasQCLIP
+(https://github.com/mlpc-ucsd/MasQCLIP, CC BY-NC 4.0) via OpenSplat3D
+(https://github.com/VisualComputingInstitute/opensplat3d, Gaussian-Splatting
+licence, Inria/MPII -- non-commercial, no right to sublicense). Neither licence
+permits redistribution under Apache 2.0. The `--encoder masqclip` code path
+expects the user to supply that file themselves and is not used by any result
+reported in the README.
+
+Method and evaluation protocols follow OpenSplat3D (arXiv:2506.07697); no code
+from it is distributed here.
+
+Submodules under external/ retain their own licences: glfw (Zlib), Eigen
+(MPL2), Dear ImGui (MIT), atomic_queue (MIT), Mesa (MIT), oneTBB (Apache 2.0).

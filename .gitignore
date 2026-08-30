@@ -36,3 +36,4 @@ ckpts/
 # Checkpoints: written to output/, never versioned.
 *.pt
 *.pth
+third_party/masqclip.py

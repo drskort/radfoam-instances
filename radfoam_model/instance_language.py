@@ -151,7 +151,20 @@ class LanguageEncoder:
             self.processor = AutoProcessor.from_pretrained(SIGLIP)
             self.model = AutoModel.from_pretrained(SIGLIP).to(device).eval()
         elif kind == "masqclip":
-            from third_party.masqclip import MasQCLIP
+            # Not vendored: MasQCLIP is CC BY-NC 4.0 and OpenSplat3D's copy is
+            # under the Inria/MPII Gaussian-Splatting licence, which forbids
+            # sublicensing -- neither can ship inside an Apache 2.0 tree. Drop
+            # opensplat3d/language/masqclip.py into third_party/ yourself to use
+            # this encoder; nothing reported in the README depends on it.
+            try:
+                from third_party.masqclip import MasQCLIP
+            except ImportError as exc:
+                raise SystemExit(
+                    "third_party/masqclip.py is not shipped (licence "
+                    "incompatible, see README). Copy it from "
+                    "VisualComputingInstitute/opensplat3d, or use "
+                    "--encoder siglip."
+                ) from exc
 
             self.model = MasQCLIP(["ViT-L/14@336px"])
             missing = self.model.from_pretrained(ckpt)

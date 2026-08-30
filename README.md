@@ -227,9 +227,16 @@ Most of this tree is upstream Radiant Foam. Mine:
 
 ## Attribution
 
-Fork of [Radiant Foam](https://github.com/theialab/radfoam) (Apache 2.0) — the
+Fork of [Radiant Foam](https://github.com/theialab/radfoam), Apache 2.0 — the
 renderer, tracer, Delaunay machinery and build system are theirs, as are
-`test.py`, `benchmark.py` and `viewer.py`. `third_party/masqclip.py` is vendored
-from [OpenSplat3D](https://github.com/VisualComputingInstitute/opensplat3d),
-which adapts [MasQCLIP](https://github.com/mlpc-ucsd/MasQCLIP). Method and
-evaluation protocols follow OpenSplat3D.
+`test.py`, `benchmark.py` and `viewer.py`. This fork is Apache 2.0 too; see
+`NOTICE` for what was changed and added.
+
+Method and evaluation protocols follow
+[OpenSplat3D](https://arxiv.org/abs/2506.07697), but no code from it is
+distributed here. `--encoder masqclip` needs `third_party/masqclip.py` from
+their repo, which is not shipped: it derives from
+[MasQCLIP](https://github.com/mlpc-ucsd/MasQCLIP) (CC BY-NC 4.0) through a
+codebase under the non-commercial Gaussian-Splatting licence, and neither
+permits redistribution under Apache 2.0. Nothing reported here uses it —
+`--encoder siglip` does.
