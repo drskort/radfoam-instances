@@ -17,8 +17,7 @@ https://github.com/user-attachments/assets/0a6ef355-1e84-4b5a-a42d-bfe20df45f47
 
 ## Motivation
 
-OpenSplat3D learned instance embeddings from SAM masks but instances have smooth boundaries between splats.
-Voronoi Cells partition the space cleanly making these boundaries clean.
+OpenSplat3D learns instance embeddings on Gaussian splats, but splats overlap and fade into one another, so object boundaries inherit that blur. Radiant Foam's Voronoi cells tile space with no overlay. This mean every point belongs to exactly one cell, so an instance partition over cells maintains crisp boundaries by construction. This repo tests whether that structural advantage shows up in practice. It does: the strongest boundary accuracy (77.7 mBIoU) in the LERF-Mask comparison below.
 
 ## About this project
 
@@ -42,6 +41,23 @@ Two additions to the OpenSplat3D recipe:
 Every number below is regenerated from `results/` by
 `scripts/summarize_results.py`, the figures by `scripts/make_figures.py`.
 
+### LERF-Mask
+
+Mean over figurines / ramen / teatime. The protocol is OpenSplat3D's: a prompt
+is grounded with GroundingDINO + SAM in one reference view rather than queried
+against a language field, so the Gaussian Grouping and ILGS rows come from a
+different procedure. Their masks may overlap. A partition of space cannot.
+
+| method | mIoU | mBIoU |
+|---|---|---|
+| Gaussian Grouping | 72.8 | 67.6 |
+| ILGS (ICCV 2025) | 80.5 | 76.0 |
+| this repo | 82.7 | 77.7 |
+| OpenSplat3D | 84.0 | n/a |
+
+The "this repo" row is the geometry-guided arm of the ablation below, the same
+runs rounded differently.
+
 ### ScanNet++ 3D instance segmentation
 
 Class-agnostic, scored on mesh points by ScanNet++'s
@@ -62,23 +78,6 @@ Class-agnostic, scored on mesh points by ScanNet++'s
 >
 > This row also includes the nearest-centroid noise fill described below, worth
 > +6.8 AP. OpenSplat3D's 24.5 row likewise includes their DBSCAN denoising.
-
-### LERF-Mask
-
-Mean over figurines / ramen / teatime. The protocol is OpenSplat3D's: a prompt
-is grounded with GroundingDINO + SAM in one reference view rather than queried
-against a language field, so the Gaussian Grouping and ILGS rows come from a
-different procedure. Their masks may overlap. A partition of space cannot.
-
-| method | mIoU | mBIoU |
-|---|---|---|
-| Gaussian Grouping | 72.8 | 67.6 |
-| ILGS (ICCV 2025) | 80.5 | 76.0 |
-| this repo | 82.7 | 77.7 |
-| OpenSplat3D | 84.0 | n/a |
-
-The "this repo" row is the geometry-guided arm of the ablation below, the same
-runs rounded differently.
 
 ### Geometry-guided gradients
 
